@@ -1,0 +1,349 @@
+/* ============================================
+   DESIGN SYSTEM - CADASTRO CULTURAL ILHABELA
+   Baseado em princípios de UI/UX modernos
+   ============================================ */
+
+/* 1️⃣ TYPOGRAPHY SYSTEMS 
+   Define visual rhythm, hierarchy, and readability */
+.ds-heading-hero {
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-family: 'Poppins', sans-serif;
+}
+
+.ds-heading-xl {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.ds-heading-lg {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.ds-heading-md {
+  font-size: clamp(1.25rem, 2.5vw, 1.5rem);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.ds-body-lg {
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  line-height: 1.7;
+  font-weight: 400;
+}
+
+.ds-body-md {
+  font-size: 1rem;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+.ds-label-sm {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* 2️⃣ COLOR LANGUAGE
+   Establish emotion, brand identity, and usability */
+.ds-bg-primary {
+  background: linear-gradient(135deg, #0b57d0 0%, #4285f4 100%);
+}
+
+.ds-bg-accent {
+  background: linear-gradient(135deg, #00A38C 0%, #00C9A7 100%);
+}
+
+.ds-bg-soft-blue {
+  background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%);
+}
+
+.ds-bg-soft-mint {
+  background: linear-gradient(135deg, #E0F7F4 0%, #B2DFDB 100%);
+}
+
+.ds-bg-soft-warm {
+  background: linear-gradient(135deg, #FFF8E1 0%, #FFE082 100%);
+}
+
+.ds-bg-glass-white {
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.ds-bg-glass-blue {
+  background: rgba(11, 87, 208, 0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(11, 87, 208, 0.15);
+}
+
+/* 3️⃣ SPATIAL COMPOSITION
+   Master alignment, spacing, and negative space */
+.ds-container-hero {
+  max-width: 90rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding: clamp(2rem, 5vw, 5rem) clamp(1rem, 3vw, 3rem);
+}
+
+.ds-container-content {
+  max-width: 75rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding: clamp(1.5rem, 4vw, 3rem) clamp(1rem, 3vw, 2rem);
+}
+
+.ds-section-spacing {
+  padding-top: clamp(3rem, 6vw, 6rem);
+  padding-bottom: clamp(3rem, 6vw, 6rem);
+}
+
+.ds-card-spacing {
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.ds-breathing-tight {
+  padding: clamp(1rem, 2vw, 1.5rem);
+}
+
+.ds-breathing-comfortable {
+  padding: clamp(2rem, 4vw, 3rem);
+}
+
+.ds-breathing-generous {
+  padding: clamp(3rem, 6vw, 5rem);
+}
+
+/* Grid Systems */
+.ds-grid-responsive {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.ds-grid-2col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: clamp(1.5rem, 3vw, 2rem);
+}
+
+.ds-grid-3col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: clamp(1rem, 2vw, 1.5rem);
+}
+
+/* 4️⃣ DEPTH & LAYERING
+   Use shadows, blur, and z-index planes */
+.ds-shadow-sm {
+  box-shadow: 
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.ds-shadow-md {
+  box-shadow: 
+    0 4px 6px rgba(0, 0, 0, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.ds-shadow-lg {
+  box-shadow: 
+    0 10px 15px rgba(0, 0, 0, 0.08),
+    0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.ds-shadow-xl {
+  box-shadow: 
+    0 20px 25px rgba(0, 0, 0, 0.1),
+    0 10px 10px rgba(0, 0, 0, 0.04);
+}
+
+.ds-shadow-blue {
+  box-shadow: 
+    0 10px 30px rgba(11, 87, 208, 0.15),
+    0 4px 10px rgba(11, 87, 208, 0.08);
+}
+
+.ds-shadow-green {
+  box-shadow: 
+    0 10px 30px rgba(0, 163, 140, 0.15),
+    0 4px 10px rgba(0, 163, 140, 0.08);
+}
+
+/* Elevation Layers */
+.ds-layer-base {
+  position: relative;
+  z-index: 1;
+}
+
+.ds-layer-elevated {
+  position: relative;
+  z-index: 10;
+}
+
+.ds-layer-floating {
+  position: relative;
+  z-index: 50;
+}
+
+.ds-layer-modal {
+  position: relative;
+  z-index: 100;
+}
+
+/* Interactive States */
+.ds-interactive {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ds-interactive:hover {
+  transform: translateY(-2px);
+}
+
+.ds-interactive:active {
+  transform: translateY(0);
+}
+
+/* Card Components */
+.ds-card {
+  border-radius: clamp(1rem, 2vw, 1.5rem);
+  overflow: hidden;
+}
+
+.ds-card-elevated {
+  background: white;
+  border-radius: clamp(1rem, 2vw, 1.5rem);
+  overflow: hidden;
+  box-shadow: 
+    0 4px 6px rgba(0, 0, 0, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ds-card-elevated:hover {
+  box-shadow: 
+    0 20px 25px rgba(0, 0, 0, 0.1),
+    0 10px 10px rgba(0, 0, 0, 0.04);
+  transform: translateY(-4px);
+}
+
+.ds-card-glass {
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: clamp(1.5rem, 3vw, 2rem);
+}
+
+/* Button Styles */
+.ds-btn-primary {
+  background: linear-gradient(135deg, #0b57d0 0%, #4285f4 100%);
+  color: white;
+  font-weight: 700;
+  padding: 0.75rem 2rem;
+  border-radius: 1rem;
+  border: none;
+  box-shadow: 0 4px 12px rgba(11, 87, 208, 0.25);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.ds-btn-primary:hover {
+  box-shadow: 0 8px 20px rgba(11, 87, 208, 0.35);
+  transform: translateY(-2px);
+}
+
+.ds-btn-secondary {
+  background: rgba(11, 87, 208, 0.1);
+  color: #0b57d0;
+  font-weight: 700;
+  padding: 0.75rem 2rem;
+  border-radius: 1rem;
+  border: 2px solid rgba(11, 87, 208, 0.2);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.ds-btn-secondary:hover {
+  background: rgba(11, 87, 208, 0.15);
+  border-color: rgba(11, 87, 208, 0.4);
+  transform: translateY(-2px);
+}
+
+/* Badge/Tag Styles */
+.ds-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 1rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ds-badge-primary {
+  background: rgba(11, 87, 208, 0.12);
+  color: #0b57d0;
+  border: 1px solid rgba(11, 87, 208, 0.2);
+}
+
+.ds-badge-success {
+  background: rgba(0, 163, 140, 0.12);
+  color: #00A38C;
+  border: 1px solid rgba(0, 163, 140, 0.2);
+}
+
+.ds-badge-warning {
+  background: rgba(255, 200, 87, 0.12);
+  color: #B8860B;
+  border: 1px solid rgba(255, 200, 87, 0.2);
+}
+
+/* Responsive Typography */
+@media (max-width: 768px) {
+  .ds-heading-hero {
+    font-size: 2.5rem;
+  }
+  
+  .ds-heading-xl {
+    font-size: 2rem;
+  }
+}
+
+/* Animations */
+@keyframes ds-fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ds-animate-fadeIn {
+  animation: ds-fadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Focus States for Accessibility */
+.ds-focus-ring:focus {
+  outline: 2px solid #0b57d0;
+  outline-offset: 2px;
+}
+
+.ds-focus-ring:focus:not(:focus-visible) {
+  outline: none;
+}

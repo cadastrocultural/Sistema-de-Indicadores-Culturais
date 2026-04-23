@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "strict": false,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowJs": true,
+    "checkJs": false,
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "/utils/*": ["utils/*"]
+    }
+  },
+  "include": ["src/**/*", "utils/**/*"],
+  "exclude": ["node_modules", "src/app/pages/AdminPage_FIXED.tsx", "src/app/utils/processProjetosComFaixas.ts"]
+}

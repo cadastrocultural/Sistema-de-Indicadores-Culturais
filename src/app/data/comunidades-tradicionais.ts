@@ -1,0 +1,21 @@
+// Lista oficial usada em todo o sistema (Ilhabela, SP)
+export const COMUNIDADES_TRADICIONAIS = [
+  'Vitória',
+  'Guanxumas de Búzios',
+  'Porto do Meio',
+  'Pitangueiras',
+  'Vermelha',
+  'Mansa',
+  'Canto do Ribeirão',
+  'Canto da Lagoa',
+  'Bonete',
+  'Eustáquio',
+  'Guanxuma',
+  'Serraria',
+  'Saco do Sombrio',
+  'Enchovas',
+  'Indaiaúba',
+  'Figueira',
+  'Fome',
+  'Poço/Itapema',
+] as const;

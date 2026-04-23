@@ -1,0 +1,10 @@
+PROBLEMA: A função removeDuplicates está removendo TODOS os registros ao invés de apenas as duplicatas reais.
+
+CAUSA RAIZ: A função atual só funciona para parsedData.agentes, mas quando o usuário importa grupos/coletivos, a lógica precisa detectar automaticamente qual tipo está sendo usado.
+
+ALÉM DISSO: A lógica de geração de chave única pode estar criando chaves vazias ou inválidas que fazem todos os itens parecerem duplicados.
+
+SOLUÇÃO:
+1. Detectar automaticamente se estamos trabalhando com agentes, grupos ou espaços
+2. Melhorar a lógica de chave única para não considerar itens sem CPF/CNPJ como duplicatas automaticamente
+3. Adicionar validação para chaves inválidas (undefined, null, vazias)

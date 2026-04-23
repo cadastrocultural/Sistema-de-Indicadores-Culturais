@@ -1,0 +1,57 @@
+===========================================
+🔧 CORREÇÕES NECESSÁRIAS NO ADMINPAGE.TSX
+===========================================
+
+## PROBLEMA 1: FILTRAR APENAS APROVADOS (24 projetos, não 86)
+
+📍 LOCALIZAÇÃO: Linha ~656-663
+
+❌ CÓDIGO ATUAL:
+```typescript
+      // 🎯 LOG ESPECIAL PARA CONTEMPLADOS
+      if (dataType === 'projetos' && isContempladosImport) {
+        const aprovados = processed.filter((p: any) => p.status === 'aprovado').length;
+        console.log(`🏆 Importação de CONTEMPLADOS: ${aprovados} de ${processed.length} marcados como APROVADO`);
+        if (processed.length > 0) {
+          console.log(`   📋 Amostra (primeiros 3):`, processed.slice(0, 3).map((p: any) => `${p.nomeProponente} → status: \"${p.status}\"`));
+        }
+      }
+```
+
+✅ CÓDIGO CORRETO:
+```typescript
+      // 🎯 FILTRO ESPECIAL: Se é importação de contemplados, mantém APENAS os aprovados
+      if (dataType === 'projetos' && isContempladosImport) {
+        const totalImportados = processed.length;
+        const aprovados = processed.filter((p: any) => p.status === 'aprovado');
+        
+        console.log(`🏆 [FILTRO CONTEMPLADOS] ${totalImportados} projetos na planilha → ${aprovados.length} APROVADOS (filtrando os demais)`);
+        
+        if (aprovados.length === 0) {
+          alert(`⚠️ ATENÇÃO: A planilha tem ${totalImportados} projetos, mas NENHUM está com status "Aprovado"!\n\nVerifique se a coluna "Status" tem valores como "Aprovado", "Contemplado" ou "Selecionado".`);
+          return;
+        }
+        
+        // Substitui os dados processados apenas pelos aprovados
+        processed = aprovados;
+        
+        if (aprovados.length > 0) {
+          console.log(`   📋 Amostra dos aprovados (primeiros 3):`, aprovados.slice(0, 3).map((p: any) => `${p.nomeProponente} → status: "${p.status}"`));
+        }
+      }
+```
+
+🎯 O QUE MUDOU:
+- Agora FILTRA os dados, mantendo apenas os aprovados
+- Adiciona `processed = aprovados` para substituir o array
+- Alerta se nenhum aprovado for encontrado
+
+
+## PROBLEMA 2: DUPLICAÇÃO AO SALVAR
+
+📍 LOCALIZAÇÃO: Função `saveToLocalStorage()` linha ~930-955
+
+❌ PROBLEMA: Ao detectar duplicatas por CPF/CNPJ, a lógica não está funcionando corretamente
+
+✅ SOLUÇÃO: Preciso ver a lógica exata da duplicação. Vou verificar...
+

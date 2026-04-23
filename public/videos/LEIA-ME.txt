@@ -1,0 +1,6 @@
+Os vídeos do fundo do hero da página inicial foram organizados aqui:
+
+  src\app\data\videos\
+
+Coloque novos vídeos nessa pasta (formatos: mp4, webm, mov, m4v).
+Não é obrigatório usar esta pasta public\videos\ para o hero — pode ficar vazia.
