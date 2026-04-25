@@ -11,3 +11,11 @@ yarn-error.log*
 pnpm-debug.log*
 .cursor/
 _smartcharts-extract/
+
+# Arquivos de vídeo grandes (não versionados pelo Git)
+*.mp4
+*.MOV
+*.mov
+*.avi
+*.mkv
+src/app/data/videos/
