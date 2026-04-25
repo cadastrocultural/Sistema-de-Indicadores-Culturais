@@ -1,10 +1,27 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap');
 
-body {
-  font-family: 'Poppins', sans-serif;
+:root {
+  --font-display: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+  --font-data: 'Inter', ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Força a família também nos componentes MUI */
+html {
+  font-family: var(--font-display);
+}
+
+body {
+  font-family: var(--font-display);
+}
+
+/* Números e dados: Inter (leitura densa melhor que Poppins) */
+.ds-data-font,
+.tabular-nums,
+[class*="recharts"] text,
+.recharts-text {
+  font-family: var(--font-data) !important;
+}
+
+/* Força a família nos componentes MUI */
 .MuiTypography-root,
 .MuiButton-root,
 .MuiChip-root,
@@ -12,5 +29,11 @@ body {
 .MuiFormLabel-root,
 .MuiMenuItem-root,
 .MuiTab-root {
-  font-family: 'Poppins', sans-serif !important;
+  font-family: var(--font-display) !important;
+}
+
+/* Tabelas e valores numéricos com Inter */
+.MuiTableCell-root,
+.MuiTableHead-root {
+  font-family: var(--font-data) !important;
 }

@@ -629,10 +629,24 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
     // CORREÇÃO v3: Blacklist de falsos positivos em vez de threshold percentual
     // O threshold de 40% bloqueava matches legítimos como "raca" em "Qual sua raça?"
     const STEP4_FALSE_MATCHES = [
-      ['idade', 'comunidade'],   // "comunidade" contém "idade" como sufixo
-      ['idade', 'identidade'],   // "identidade" contém "idade" como sufixo  
-      ['idade', 'qualidade'],    // "qualidade" contém "idade"
-      ['idade', 'quantidade'],   // "quantidade" contém "idade"
+      ['idade', 'comunidade'],
+      ['idade', 'identidade'],
+      ['idade', 'qualidade'],
+      ['idade', 'quantidade'],
+      ['idade', 'unidade'],
+      ['idade', 'cidade'],
+      ['idade', 'validade'],
+      ['idade', 'solidade'],
+      ['idade', 'faculdade'],
+      ['idade', 'prioridade'],
+      ['idade', 'oportunidade'],
+      ['orientacao', 'projeto'],
+      ['orientacao', 'resumo'],
+      ['orientacao', 'descricao'],
+      ['orientacao', 'pedagog'],
+      ['orientacao', 'curricular'],
+      ['orientacaosexual', 'projeto'],
+      ['orientacaosexual', 'resumo'],
     ];
     for (const key of keys) {
       const keyNorm = key.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
@@ -3236,9 +3250,10 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
     }
   }, [filtroEdital, stats.porEdital]);
 
-  const adminPinEnvRaw = (import.meta as any).env?.VITE_ADMIN_PIN as string | undefined;
+  const adminPinEnvRaw = import.meta.env.VITE_ADMIN_PIN;
   const adminPinEnv = typeof adminPinEnvRaw === 'string' ? adminPinEnvRaw.trim() : '';
   const adminPinRequired = adminPinEnv.length > 0;
+  const allowDevOpen = import.meta.env.DEV && !adminPinRequired;
 
   if (!adminAuthed) {
     return (
@@ -3251,8 +3266,10 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {adminPinRequired
-                  ? 'Informe o PIN configurado em VITE_ADMIN_PIN no arquivo .env do projeto.'
-                  : 'Acesso bloqueado: configure VITE_ADMIN_PIN no arquivo .env e reinicie o servidor.'}
+                  ? 'Informe o PIN configurado em VITE_ADMIN_PIN no arquivo .env do projeto (veja também .env.example).'
+                  : allowDevOpen
+                    ? 'Ambiente de desenvolvimento: nenhum PIN definido. Use o botão abaixo ou crie um arquivo .env com VITE_ADMIN_PIN e reinicie o servidor.'
+                    : 'Em produção é obrigatório definir VITE_ADMIN_PIN no .env antes do build. Consulte .env.example na raiz do projeto.'}
               </Typography>
               <TextField
                 fullWidth
@@ -3271,7 +3288,6 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                 sx={{ bgcolor: '#0b57d0', fontWeight: 700, py: 1.5, mb: 1 }}
                 onClick={() => {
                   if (!adminPinRequired) {
-                    alert('Configure VITE_ADMIN_PIN no .env para liberar o acesso administrativo.');
                     return;
                   }
                   if (adminLoginPin.trim() === adminPinEnv) {
@@ -3284,6 +3300,19 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
               >
                 Entrar
               </Button>
+              {allowDevOpen && (
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  sx={{ fontWeight: 700, py: 1.25, mb: 1, borderColor: '#64748b', color: '#334155' }}
+                  onClick={() => {
+                    setAdminAuthed(true);
+                    setAdminLoginPin('');
+                  }}
+                >
+                  Entrar sem PIN (somente este ambiente local)
+                </Button>
+              )}
               <Button fullWidth variant="text" onClick={() => onNavigate('home')} sx={{ fontWeight: 600 }}>
                 ← Voltar ao site
               </Button>

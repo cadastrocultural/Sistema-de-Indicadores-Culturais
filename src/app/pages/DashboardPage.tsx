@@ -533,6 +533,11 @@ export function DashboardPage() {
     }
   };
 
+  const getMarkerCoreColor = (item: ItemCultural) => {
+    if (item.tipo === 'edital') return item.eh_contemplado ? '#10b981' : '#94a3b8';
+    return getMarkerColor(item.tipo);
+  };
+
   // 🎯 FUNÇÃO PARA EMOJI DO MARCADOR
   const getMarkerEmoji = (tipo: string) => {
     switch(tipo) {
@@ -572,6 +577,16 @@ export function DashboardPage() {
   }, [filteredItems]);
 
   const pinsComCoord = useMemo(() => mapPoints.length, [mapPoints]);
+  const pinsPorTipo = useMemo(() => {
+    const out = { agente: 0, grupo: 0, espaco: 0, edital: 0 };
+    mapPoints.forEach(({ item }) => {
+      if (item.tipo === 'agente' || item.tipo === 'mapeamento') out.agente += 1;
+      else if (item.tipo === 'grupo') out.grupo += 1;
+      else if (item.tipo === 'espaco') out.espaco += 1;
+      else if (item.tipo === 'edital') out.edital += 1;
+    });
+    return out;
+  }, [mapPoints]);
 
   // 🎯 Contagem dinâmica para aba de editais: inscritos vs contemplados
   const editaisItems = useMemo(() => todosItens.filter(i => i.tipo === 'edital'), [todosItens]);
@@ -713,15 +728,13 @@ export function DashboardPage() {
     setFEdital('');
   };
 
-  if (!isMounted) return <div className="min-h-screen bg-[#f8f9fa]" />;
+  if (!isMounted) return <div className="min-h-screen ds-dash-page" />;
 
   const currentDatasetName = tabValue === 0 ? 'Mapeamento Cultural 2020' : 'Editais (PNAB, Aldir Blanc, etc)';
   const currentColor = tabValue === 0 ? THEME_COLORS.green : THEME_COLORS.primary;
 
   return (
-    <div 
-      className="min-h-screen pb-20 font-sans text-[#1b1b1f] relative bg-gradient-to-br from-gray-50 to-blue-50"
-    >
+    <div className="relative min-h-screen pb-20 font-sans text-[#1b1b1f] ds-dash-page">
       {/* Todo conteúdo */}
       <div className="relative" style={{ zIndex: 1 }}>
         {/* Header Section - Aplicando Design System */}
@@ -730,8 +743,7 @@ export function DashboardPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: "easeOut" }}
-            className="max-w-5xl mx-auto ds-card-glass text-center ds-shadow-xl"
-            style={{ padding: 'clamp(2.5rem, 5vw, 4rem)' }}
+            className="ds-dash-panel mx-auto max-w-5xl rounded-2xl px-6 py-10 text-center sm:px-10 sm:py-12 md:rounded-3xl md:px-12 md:py-14"
           >
             {/* Badge do Sistema */}
             <div className="flex justify-center items-center gap-2 mb-6">
@@ -783,15 +795,8 @@ export function DashboardPage() {
         </section>
 
         {/* Tabs - Centralizados com glassmorphism */}
-        <section className="container mx-auto px-6 mb-6">
-          <div 
-            className="max-w-5xl mx-auto rounded-[1.5rem] border border-white/30 overflow-hidden"
-            style={{
-              background: 'rgba(255, 255, 255, 0.4)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-            }}
-          >
+        <section className="container mx-auto mb-6 px-6">
+          <div className="ds-dash-panel mx-auto max-w-5xl overflow-hidden rounded-2xl md:rounded-3xl">
             <Tabs 
               value={tabValue} 
               onChange={(_, newValue) => setTabValue(newValue)}
@@ -799,7 +804,7 @@ export function DashboardPage() {
               centered
               sx={{ 
                 borderBottom: 1, 
-                borderColor: 'rgba(0, 0, 0, 0.1)',
+                borderColor: 'rgba(15, 23, 42, 0.08)',
                 '& .MuiTab-root': { 
                   fontWeight: 700, 
                   textTransform: 'none', 
@@ -890,6 +895,71 @@ export function DashboardPage() {
             </div>
           ))}
         </section>
+
+        {/* ── Insights estratégicos (gerados automaticamente dos dados filtrados) ── */}
+        {filteredItems.length > 0 && (() => {
+          const bairroTop = estatisticasPorBairro[0];
+          const bairrosMapeados = estatisticasPorBairro.filter(b => b.bairro !== 'Não informado').length;
+          const totalComBairro = filteredItems.filter(i => i.bairro && i.bairro !== 'Não informado').length;
+          const concBairroTop = bairroTop ? ((bairroTop.total / Math.max(1, totalComBairro)) * 100) : 0;
+          const taxaAprov = tabValue === 1 ? ((filteredContemplados.length / Math.max(1, filteredItems.filter(i => i.tipo === 'edital').length)) * 100) : 0;
+          const percMulheres = diversidadeStats.percMulheres;
+          const percNegros = diversidadeStats.percNegros;
+
+          const insights: Array<{ icon: string; text: string; level: 'green' | 'yellow' | 'blue' }> = [];
+
+          if (tabValue === 0) {
+            if (concBairroTop > 40 && bairroTop)
+              insights.push({ icon: '📍', level: 'yellow', text: `${bairroTop.bairro} concentra ${concBairroTop.toFixed(0)}% dos agentes — crie editais territorizados para bairros com menos de 5 agentes cadastrados.` });
+            else if (bairrosMapeados > 8)
+              insights.push({ icon: '✅', level: 'green', text: `${bairrosMapeados} bairros atendidos — boa cobertura territorial. Verifique os bairros sem representação no mapa.` });
+            if (percMulheres > 0 && percMulheres < 35)
+              insights.push({ icon: '⚠️', level: 'yellow', text: `Mulheres: ${percMulheres}% dos agentes — abaixo do ideal. Chamadas específicas e comunicação em espaços femininos podem ampliar a participação.` });
+            if (percNegros > 0 && percNegros < 30)
+              insights.push({ icon: '📉', level: 'yellow', text: `Negros/pardos: ${percNegros}% — sub-representação em relação à população local. Ações afirmativas e parceria com coletivos afro-culturais são recomendadas.` });
+            if (percMulheres >= 45 && percNegros >= 30)
+              insights.push({ icon: '🏆', level: 'green', text: `Perfil de diversidade equilibrado neste recorte — mantenha o monitoramento e use estes índices como meta para os próximos editais.` });
+          } else {
+            if (taxaAprov > 0 && taxaAprov < 25)
+              insights.push({ icon: '⚠️', level: 'yellow', text: `Taxa de aprovação de ${taxaAprov.toFixed(1)}% — apenas 1 em cada 4 inscritos é contemplado. Avalie ampliar vagas ou criar chamadas menores e mais focadas.` });
+            else if (taxaAprov >= 50)
+              insights.push({ icon: '✅', level: 'green', text: `Taxa de aprovação de ${taxaAprov.toFixed(1)}% — boa cobertura do edital. Considere ampliar se houver demanda reprimida na lista de suplentes.` });
+            const valorTotal = filteredContemplados.reduce((acc, i) => acc + (i.valor || 0), 0);
+            const mediaValor = filteredContemplados.length > 0 ? valorTotal / filteredContemplados.length : 0;
+            if (mediaValor > 0)
+              insights.push({ icon: '💰', level: 'blue', text: `Valor médio por contemplado: ${formatBRL(mediaValor)}. Use esta referência para calibrar o teto de projetos em futuros editais.` });
+          }
+
+          if (insights.length === 0) return null;
+          return (
+            <section className="container mx-auto px-6 mb-8 max-w-5xl">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: currentColor }}>
+                  Insights para tomada de decisão
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                  {insights.map((ins, i) => {
+                    const cfg = {
+                      green:  { bg: '#f0fdf4', border: '#bbf7d0', color: '#166534' },
+                      yellow: { bg: '#fefce8', border: '#fde68a', color: '#92400e' },
+                      blue:   { bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
+                    }[ins.level];
+                    return (
+                      <div
+                        key={i}
+                        className="flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold leading-relaxed"
+                        style={{ backgroundColor: cfg.bg, border: `1px solid ${cfg.border}`, color: cfg.color }}
+                      >
+                        <span className="shrink-0 text-sm">{ins.icon}</span>
+                        <span>{ins.text}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          );
+        })()}
 
         {tabValue === 1 && (
           <section className="container mx-auto px-6 mb-10 max-w-6xl">
@@ -1006,48 +1076,62 @@ export function DashboardPage() {
             }}
           >
             <div className="h-[500px] rounded-[2rem] overflow-hidden relative z-0">
-              <MapContainer center={[-23.82, -45.36]} zoom={12} style={{ height: '100%', width: '100%' }}>
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
+              <MapContainer center={[-23.82, -45.36]} zoom={12} style={{ height: '100%', width: '100%' }} scrollWheelZoom={false}>
+                <TileLayer
+                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                  attribution="&copy; OpenStreetMap &copy; CARTO"
+                />
                 {mapPoints.map(({ item, lat, lng }, idx) => (
                   itemTemCoordenadasMapa(item) ? (
-                    <CircleMarker 
-                      key={`${item.tipo}-${item.id}-${idx}`} 
-                      center={[lat, lng]} 
-                      radius={tabValue === 0 ? 6 : (item.eh_contemplado ? 8 : 5)} 
-                      pathOptions={{ 
-                        fillColor: item.tipo === 'edital' ? (item.eh_contemplado ? '#10b981' : '#94a3b8') : getMarkerColor(item.tipo), 
-                        color: '#FFFFFF', 
-                        weight: 2, 
-                        fillOpacity: tabValue === 0 ? 0.7 : (item.eh_contemplado ? 0.9 : 0.5) 
-                      }}
-                    >
-                      <Popup>
-                        <div className="p-2 min-w-[220px]">
-                          <div className="text-[0.6rem] font-black uppercase tracking-widest mb-1" style={{ color: currentColor }}>
-                            {getMarkerEmoji(item.tipo)} {item.edital || item.ano} • {item.categoria}
-                          </div>
-                          <div className="font-bold text-sm leading-tight mb-2" style={{ color: currentColor }}>
-                            {item.nome}
-                          </div>
-                          <div className="text-xs font-semibold text-[#5f5f6a] mb-3">{item.proponente}</div>
-                          {item.tipo === 'edital' && (
-                            <div className="mb-2">
-                              {item.eh_contemplado ? (
-                                <span className="inline-block text-[0.6rem] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Contemplado</span>
-                              ) : (
-                                <span className="inline-block text-[0.6rem] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Inscrito</span>
-                              )}
+                    <React.Fragment key={`${item.tipo}-${item.id}-${idx}`}>
+                      <CircleMarker
+                        center={[lat, lng]}
+                        radius={tabValue === 0 ? 9 : (item.eh_contemplado ? 11 : 8)}
+                        pathOptions={{
+                          fillColor: getMarkerCoreColor(item),
+                          color: 'transparent',
+                          weight: 0,
+                          fillOpacity: 0.18,
+                        }}
+                      />
+                      <CircleMarker 
+                        center={[lat, lng]} 
+                        radius={tabValue === 0 ? 5 : (item.eh_contemplado ? 7 : 4)} 
+                        pathOptions={{ 
+                          fillColor: getMarkerCoreColor(item),
+                          color: '#ffffff',
+                          weight: 2,
+                          fillOpacity: tabValue === 0 ? 0.92 : (item.eh_contemplado ? 0.95 : 0.8),
+                        }}
+                      >
+                        <Popup>
+                          <div className="p-2 min-w-[220px]">
+                            <div className="text-[0.6rem] font-black uppercase tracking-widest mb-1" style={{ color: currentColor }}>
+                              {getMarkerEmoji(item.tipo)} {item.edital || item.ano} • {item.categoria}
                             </div>
-                          )}
-                          <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-                            <span className="text-[0.65rem] font-bold text-[#5f5f6a]">{item.bairro}</span>
-                            {item.valor ? (
-                              <span className="text-sm font-black" style={{ color: currentColor }}>{formatBRL(item.valor)}</span>
-                            ) : null}
+                            <div className="font-bold text-sm leading-tight mb-2" style={{ color: currentColor }}>
+                              {item.nome}
+                            </div>
+                            <div className="text-xs font-semibold text-[#5f5f6a] mb-3">{item.proponente}</div>
+                            {item.tipo === 'edital' && (
+                              <div className="mb-2">
+                                {item.eh_contemplado ? (
+                                  <span className="inline-block text-[0.6rem] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Contemplado</span>
+                                ) : (
+                                  <span className="inline-block text-[0.6rem] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Inscrito</span>
+                                )}
+                              </div>
+                            )}
+                            <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                              <span className="text-[0.65rem] font-bold text-[#5f5f6a]">{item.bairro}</span>
+                              {item.valor ? (
+                                <span className="text-sm font-black" style={{ color: currentColor }}>{formatBRL(item.valor)}</span>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                      </Popup>
-                    </CircleMarker>
+                        </Popup>
+                      </CircleMarker>
+                    </React.Fragment>
                   ) : null
                 ))}
               </MapContainer>
@@ -1091,7 +1175,11 @@ export function DashboardPage() {
                 </div>
                 <div className="mt-3 space-y-1 border-t border-gray-200 pt-3">
                   <div className="text-[0.65rem] font-bold leading-snug text-gray-800">
-                    Pinos no mapa: <span className="tabular-nums text-gray-900">{pinsComCoord}</span>
+                    Pinos renderizados: <span className="tabular-nums text-gray-900">{pinsComCoord}</span>
+                  </div>
+                  <div className="text-[0.62rem] font-semibold text-gray-500">
+                    Agentes: {pinsPorTipo.agente} · Grupos: {pinsPorTipo.grupo} · Espaços: {pinsPorTipo.espaco}
+                    {tabValue === 1 ? ` · Editais: ${pinsPorTipo.edital}` : ''}
                   </div>
                   <div className="text-[0.62rem] font-semibold text-gray-500">
                     de {filteredItems.length} registo{filteredItems.length === 1 ? '' : 's'} com este filtro

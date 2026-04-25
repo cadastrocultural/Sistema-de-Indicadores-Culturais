@@ -19,6 +19,59 @@ const IDENTIDADE_GENERO_SCAN_OPTIONS = [
   'Pangênero',
 ] as const;
 
+/** Colunas cujo nome contém "idade" mas não são idade/faixa etária. */
+function keyIsFalsePositiveIdade(kNorm: string): boolean {
+  return (
+    kNorm.includes('identidade') ||
+    kNorm.includes('comunidade') ||
+    kNorm.includes('unidade') ||
+    kNorm.includes('quantidade') ||
+    kNorm.includes('qualidade') ||
+    kNorm.includes('validade') ||
+    kNorm.includes('cidade') ||
+    kNorm.includes('solidade') ||
+    kNorm.includes('faculdade') ||
+    kNorm.includes('prioridade') ||
+    kNorm.includes('oportunidade')
+  );
+}
+
+function keyMatchesPatternLoose(kNorm: string, pNorm: string): boolean {
+  if (kNorm === pNorm) return true;
+  if (pNorm.length >= 10) return kNorm.includes(pNorm);
+  if (pNorm.length >= 8) return kNorm.includes(pNorm) || kNorm.startsWith(pNorm) || kNorm.endsWith(pNorm);
+  if (pNorm.length >= 6) return kNorm.includes(pNorm);
+  return kNorm.startsWith(`${pNorm}_`) || kNorm.endsWith(`_${pNorm}`) || kNorm.includes(`_${pNorm}_`);
+}
+
+/** Só aceita chaves claramente ligadas à orientação sexual (evita "Orientação do projeto"). */
+export function keyLooksLikeOrientacaoSexualColumn(kNorm: string): boolean {
+  if (kNorm.includes('genero') && !kNorm.includes('orientacao')) return false;
+  if (
+    kNorm.includes('projeto') ||
+    kNorm.includes('resumo') ||
+    kNorm.includes('descricao') ||
+    kNorm.includes('objetivo') ||
+    kNorm.includes('metodologia') ||
+    kNorm.includes('pedagog') ||
+    kNorm.includes('curricular') ||
+    kNorm.includes('proposta') ||
+    kNorm.includes('justificativa') ||
+    kNorm.includes('cronograma') ||
+    kNorm.includes('orcamento')
+  ) {
+    return false;
+  }
+  if (kNorm.includes('orientacaosexual') || kNorm.includes('orientacao_sexual') || kNorm.includes('orientacaosex')) return true;
+  if (kNorm.includes('sexualidade')) return true;
+  if (kNorm.includes('orientacao') && (kNorm.includes('sexual') || kNorm.includes('sexuais'))) return true;
+  if (kNorm.includes('qual') && kNorm.includes('orientacao') && kNorm.includes('sexual')) return true;
+  return false;
+}
+
+/**
+ * Busca valor por nome de campo conhecido + fuzzy seguro (sem `pNorm.includes(kNorm)` nem "idade" em "identidade").
+ */
 export function findFieldValue(obj: any, ...patterns: string[]): string {
   if (!obj || typeof obj !== 'object') return '';
   for (const p of patterns) {
@@ -29,15 +82,34 @@ export function findFieldValue(obj: any, ...patterns: string[]): string {
     const pNorm = p
       .toLowerCase()
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '');
+    if (pNorm.length < 2) continue;
+
     const found = keys.find((k) => {
       const kNorm = k
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[;:.,]/g, '')
+        .replace(/[^a-z0-9]/g, '')
         .trim();
-      return kNorm === pNorm || kNorm.includes(pNorm) || pNorm.includes(kNorm);
+      if (kNorm.length < 2) return false;
+      if (kNorm === pNorm) return true;
+
+      const isOrientacaoPattern = pNorm === 'orientacao' || pNorm.includes('orientacaosex') || pNorm === 'sexualidade';
+
+      if (isOrientacaoPattern) {
+        if (!keyLooksLikeOrientacaoSexualColumn(kNorm)) return false;
+        return keyMatchesPatternLoose(kNorm, pNorm);
+      }
+
+      if (pNorm === 'idade' || (pNorm.length <= 12 && pNorm.includes('idade') && !pNorm.includes('identidade'))) {
+        if (keyIsFalsePositiveIdade(kNorm)) return false;
+        return keyMatchesPatternLoose(kNorm, pNorm);
+      }
+
+      return keyMatchesPatternLoose(kNorm, pNorm);
     });
     if (found && obj[found] !== undefined && obj[found] !== null && obj[found] !== '') return String(obj[found]);
   }
@@ -61,7 +133,13 @@ export function extractPcdColumnValue(obj: any): string {
       cl.includes('publico') ||
       cl.includes('faixa etaria') ||
       cl.includes('faixaet') ||
-      (cl.includes('valor') && !cl.includes('deficienc'))
+      (cl.includes('valor') && !cl.includes('deficienc')) ||
+      cl.includes('projeto') ||
+      cl.includes('resumo') ||
+      cl.includes('descricao') ||
+      cl.includes('objetivo') ||
+      cl.includes('metodologia') ||
+      cl.includes('orcamento')
     ) {
       continue;
     }
@@ -73,6 +151,10 @@ export function extractPcdColumnValue(obj: any): string {
     const v = obj[k];
     const s = v !== undefined && v !== null ? String(v).trim() : '';
     if (!s) continue;
+    const sv = normalizeLooseKey(s);
+    if ((sv === 'sim' || sv === 'nao' || sv === 'não' || sv === 's' || sv === 'n') && score < 5) {
+      if (!cl.includes('deficienc') && !/(^|_)pcd(_|$)/.test(cl)) continue;
+    }
     const keyLen = k.length;
     if (!best || score > best.score || (score === best.score && keyLen > best.keyLen)) {
       best = { score, val: s, keyLen };
@@ -179,6 +261,22 @@ function scanIdentidadeGeneroCol(a: any): string {
   ]);
 }
 
+/** Texto longo típico de resumo de projeto (não é orientação sexual). */
+function looksLikeProjetoNarrativa(s: string): boolean {
+  const v = normalizeLooseKey(s).slice(0, 160);
+  if (s.length > 140) return true;
+  return (
+    v.startsWith('oprojeto') ||
+    v.startsWith('ocoletivo') ||
+    v.startsWith('realizaremos') ||
+    v.startsWith('ocine') ||
+    v.startsWith('odocumentario') ||
+    v.startsWith('otitulo') ||
+    v.includes('serieemestilo') ||
+    v.includes('consistenarealizacao')
+  );
+}
+
 export function diversityFieldsFromRaw(a: any): DiversityFieldsSlice {
   const orientacaoDireta = findFieldValue(
     a,
@@ -186,11 +284,12 @@ export function diversityFieldsFromRaw(a: any): DiversityFieldsSlice {
     'Orientação Sexual',
     'Orientacao Sexual',
     'sexualidade',
-    'orientacao',
     'orientacao_sex'
   );
+  const od = orientacaoDireta.trim();
+  const orientacaoLimpa = !od || looksLikeProjetoNarrativa(od) ? '' : od;
   /** Planilhas com rótulo fora do padrão: mesmo scanner usado no Admin na importação. */
-  const orientacao_sexual = orientacaoDireta.trim() || scanOrientacaoInRow(a).trim();
+  const orientacao_sexual = orientacaoLimpa || scanOrientacaoInRow(a).trim();
 
   const identidadeDireta = findFieldValue(
     a,

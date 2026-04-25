@@ -2,14 +2,14 @@ import React, { useMemo, useState, useEffect, useId, useRef, useCallback } from 
 import { motion } from 'motion/react';
 import { 
   TrendingUp, Users, MapPin, Calendar, ArrowRight, 
-  Search, ShieldCheck, Globe, Trophy, FileText, ChevronRight,
+  Search, ShieldCheck, Trophy, FileText, ChevronRight,
   BarChart3, PieChart as PieChartIcon, Award, Building2, Bug, ExternalLink, ScrollText,
   CheckCircle2,
 } from 'lucide-react';
 import { Button, Card, CardContent, Chip, Tooltip, Box, Stack, Typography, Paper } from '@mui/material';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
-  ResponsiveContainer, Line, Legend, Area, ComposedChart,
+  ResponsiveContainer, Line, Legend, Area, ComposedChart, PieChart, Pie, Cell,
 } from 'recharts';
 
 import { formatBRL, COMUNIDADES_TRADICIONAIS } from '../data/pnab-data';
@@ -21,6 +21,9 @@ import {
   normalizeFullPersonNameForRanking,
   pickRicherCadastroPayload,
 } from './admin/projetosDemandaOferta';
+import { computeEstatisticasPublicas } from '../data/estatisticas-publicas';
+import { IlhabelaTerritoryMap } from '../components/maps/IlhabelaTerritoryMap';
+import { InciclePanel } from '../components/dashboard/InciclePanel';
 import { resolveComunidadeTradicional } from './admin/comunidadeTradicionalUtils';
 
 import { parseBRLValue } from '../data/editais-data';
@@ -30,6 +33,7 @@ import { Timeline } from '../components/Timeline';
 import { AdminImportCharts } from '../components/admin/AdminImportCharts';
 import { HomeDiversityCharts, type DiversityChartsPayload } from '../components/HomeDiversityCharts';
 import { HERO_BACKGROUND_VIDEO_URLS } from '../data/hero-videos';
+import { findFieldValue } from '../utils/dashboardDiversityFields';
 
 // Helper: adiciona IDs únicos a arrays de dados para evitar warnings de keys duplicadas no Recharts
 const addUniqueIds = <T extends Record<string, any>>(arr: T[], prefix = 'item'): T[] => {
@@ -51,13 +55,17 @@ const CORES_CADASTRO = {
   cinza: '#5f5f6a'
 };
 
-/** Estilo alinhado a painéis analíticos: fundo claro, borda suave, sombra discreta */
+/** Cartões de gráfico — estilo painéis recentes (borda suave, sombra difusa) */
 const chartCardSx = {
-  borderRadius: '20px',
-  boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 12px 32px rgba(15,23,42,0.06)',
-  border: '1px solid #e2e8f0',
+  borderRadius: '18px',
+  boxShadow:
+    '0 1px 3px rgba(15,23,42,0.05), 0 18px 48px -18px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.9)',
+  border: '1px solid rgba(15,23,42,0.055)',
   bgcolor: '#ffffff',
 } as const;
+
+/** Paleta vibrante (referência: dashboards analíticos modernos) */
+const CHART_VIVID = ['#7c3aed', '#2563eb', '#06b6d4', '#db2777', '#ea580c', '#16a34a', '#8b5cf6', '#0d9488'] as const;
 
 const chartTooltipContentStyle: React.CSSProperties = {
   borderRadius: '12px',
@@ -68,6 +76,9 @@ const chartTooltipContentStyle: React.CSSProperties = {
   padding: '10px 14px',
   background: 'rgba(255,255,255,0.98)',
 };
+
+/** Altura dos gráficos no painel inicial (acima da dobra) */
+const LEAD_CHART_HEIGHT = 200;
 
 function normalizeLooseKey(s: string): string {
   return s
@@ -289,10 +300,16 @@ function DashboardSectionHeader({
   description: string;
 }) {
   return (
-    <div className="mb-6 md:mb-8 max-w-3xl">
-      <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0b57d0] mb-2">{kicker}</p>
-      <h2 className="text-2xl md:text-3xl font-black tracking-tight text-[#1b1b1f] mb-2">{title}</h2>
-      <p className="text-[#5f5f6a] font-medium text-sm md:text-base leading-relaxed">{description}</p>
+    <div className="mb-6 flex max-w-3xl gap-4 md:mb-8 md:gap-5">
+      <div
+        className="hidden w-1 shrink-0 rounded-full bg-gradient-to-b from-[#0b57d0] via-sky-500/80 to-slate-300/50 sm:block sm:min-h-[4.5rem]"
+        aria-hidden
+      />
+      <div className="min-w-0">
+        <p className="ds-dash-kicker mb-2">{kicker}</p>
+        <h2 className="ds-dash-section-title mb-2">{title}</h2>
+        <p className="text-sm font-medium leading-relaxed text-slate-600 md:text-base">{description}</p>
+      </div>
     </div>
   );
 }
@@ -319,17 +336,34 @@ function KpiMetricCard({
       sx={{
         height: '100%',
         minWidth: 0,
-        borderRadius: '16px',
+        position: 'relative',
+        overflow: 'hidden',
+        borderRadius: '14px',
         bgcolor: '#ffffff',
-        border: '1px solid #e8ecf3',
-        borderLeft: `4px solid ${borderColor}`,
-        boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.06)',
+        border: '1px solid rgba(15,23,42,0.06)',
+        boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 14px 40px -18px rgba(15,23,42,0.1)',
+        transition: 'box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease',
+        '&:hover': {
+          boxShadow: '0 8px 32px -10px rgba(15,23,42,0.14)',
+          transform: 'translateY(-2px)',
+          borderColor: 'rgba(11, 87, 208, 0.12)',
+        },
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 3,
+          background: `linear-gradient(90deg, ${borderColor} 0%, ${borderColor}66 55%, transparent 100%)`,
+          pointerEvents: 'none',
+        },
       }}
     >
-      <CardContent className="p-6 md:p-7">
-        <div className="flex items-start justify-between gap-3 mb-3">
+      <CardContent className="p-6 pt-7 md:p-7 md:pt-8">
+        <div className="mb-3 flex items-start justify-between gap-3">
           <div
-            className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1 ring-black/[0.04]"
             style={{ backgroundColor: iconBg, color: iconColor }}
           >
             {icon}
@@ -337,7 +371,7 @@ function KpiMetricCard({
           <div className="shrink-0">{chip}</div>
         </div>
         <div className="min-w-0">{main}</div>
-        <p className="text-slate-500 text-sm font-semibold mt-2.5 leading-snug">{subtitle}</p>
+        <p className="mt-2.5 text-[0.95rem] font-semibold leading-snug text-slate-500 break-words">{subtitle}</p>
       </CardContent>
     </Card>
   );
@@ -516,7 +550,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
         agentesImportados = parsed.agentes || [];
         gruposImportados = parsed.grupos || [];
         espacosImportados = parsed.espacos || [];
-        editaisImportados = (parsed.projetos || parsed.editais || []) as any[];
+        editaisImportados = (parsed.projetos || []) as any[];
         if (parsed.customEditalLinks && typeof parsed.customEditalLinks === 'object') {
           customEditalLinks = parsed.customEditalLinks;
         }
@@ -603,25 +637,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
     const faixaAnos =
       anosLista.length === 0 ? '' : anosLista.length === 1 ? String(anosLista[0]) : `${anosLista[0]}–${anosLista[anosLista.length - 1]}`;
     
-    // 🎨 INDICADORES DE DIVERSIDADE (busca robusta em campos normalizados + colunas originais)
-    // Helper: busca valor em campos conhecidos + busca fuzzy nas keys do objeto
-    const findFieldValue = (obj: any, ...patterns: string[]): string => {
-      // 1) Campos diretos normalizados
-      for (const p of patterns) {
-        if (obj[p] !== undefined && obj[p] !== null && obj[p] !== '') return String(obj[p]);
-      }
-      // 2) Busca case-insensitive sem acentos em todas as keys do objeto
-      const keys = Object.keys(obj);
-      for (const p of patterns) {
-        const pNorm = p.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        const found = keys.find(k => {
-          const kNorm = k.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[;:.,]/g, '').trim();
-          return kNorm === pNorm || kNorm.includes(pNorm);
-        });
-        if (found && obj[found] !== undefined && obj[found] !== null && obj[found] !== '') return String(obj[found]);
-      }
-      return '';
-    };
+    // 🎨 INDICADORES DE DIVERSIDADE (findFieldValue compartilhado: evita “idade” em identidade/unidade e “orientação” em colunas de projeto)
 
     const looksLikePersonName = (v: string): boolean => {
       const s = String(v || '').trim();
@@ -729,10 +745,57 @@ export function HomePage({ onNavigate }: HomePageProps) {
       if (valor <= 5_000) return 'R$ 2.001 a R$ 5.000';
       return 'Acima de R$ 5.000';
     };
+
+    const findEstadoCivilFallback = (obj: any): string => {
+      if (!obj || typeof obj !== 'object') return '';
+      for (const v of Object.values(obj)) {
+        const raw = String(v || '').trim();
+        if (!raw || raw.length > 40) continue;
+        const n = normalizeEstadoCivil(raw);
+        if (n) return raw;
+      }
+      return '';
+    };
+
+    const findRendaRawFallback = (obj: any): string => {
+      if (!obj || typeof obj !== 'object') return '';
+      for (const [k, v] of Object.entries(obj)) {
+        const kn = normalizeLooseKey(String(k || ''));
+        if (
+          kn.includes('renda') ||
+          kn.includes('salario') ||
+          kn.includes('salário') ||
+          kn.includes('remuneracao') ||
+          kn.includes('remuneração')
+        ) {
+          const raw = String(v || '').trim();
+          if (raw) return raw;
+        }
+      }
+      return '';
+    };
+
+    const findExperienciaRawFallback = (obj: any): string => {
+      if (!obj || typeof obj !== 'object') return '';
+      for (const [k, v] of Object.entries(obj)) {
+        const kn = normalizeLooseKey(String(k || ''));
+        if (
+          kn.includes('experiencia') ||
+          kn.includes('experiência') ||
+          (kn.includes('tempo') && kn.includes('atuacao')) ||
+          kn.includes('anosdeatuacao') ||
+          kn.includes('carreira')
+        ) {
+          const raw = String(v || '').trim();
+          if (raw && raw.length <= 48) return raw;
+        }
+      }
+      return '';
+    };
     
-    // 🎯 COMBINA agentes + grupos + espaços + projetos para indicadores de diversidade
-    // Agentes/grupos/espaços têm dados demográficos do mapeamento; projetos têm comunidadeTradicional dos editais
-    const todosParaDiversidade = [...agentesFinais, ...gruposImportados, ...espacosImportados, ...editaisFinais];
+    // 🎯 Indicadores de diversidade com a MESMA base da página inicial:
+    // apenas cadastros culturais (agentes + grupos + espaços), sem somar linhas de projetos/editais.
+    const todosParaDiversidade = [...agentesFinais, ...gruposImportados, ...espacosImportados];
     const baseParaPercentual = todosParaDiversidade.length || 1;
     
     /** Mesma regra do Admin: só conta com nome oficial em COMUNIDADES_TRADICIONAIS (evita "Sim" genérico ou a palavra "comunidade" em títulos). */
@@ -785,8 +848,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
     const tradCadastroBase = [...agentesFinais, ...gruposImportados, ...espacosImportados].filter((a: any) =>
       ehComunidadeTradicionalRegistro(a)
     ).length;
-    const tradProjetos = editaisFinais.filter((p: any) => ehComunidadeTradicionalRegistro(p, { includeNomeProjeto: true })).length;
-    const trad = tradCadastroBase + tradProjetos;
+    const trad = tradCadastroBase;
     const percTrad = baseParaPercentual > 0 ? Math.round((trad / baseParaPercentual) * 100) : 0;
     
     const negros = todosParaDiversidade.filter((a: any) => {
@@ -794,15 +856,89 @@ export function HomePage({ onNavigate }: HomePageProps) {
       return raca.includes('pret') || raca.includes('pard') || raca.includes('negr') || raca.includes('afro');
     }).length;
 
+    /** Remove textos narrativos de projeto que vazam para colunas de orientação sexual em algumas planilhas. */
+    const sanitizeOrientacaoSexualValue = (raw: string): string => {
+      const txt = String(raw || '').trim();
+      if (!txt) return '';
+      if (txt.length > 90) return '';
+      const low = txt
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const compact = low.replace(/[^a-z0-9]/g, '');
+      const hasOrientacaoKeyword =
+        low.includes('hetero') ||
+        low.includes('homossexual') ||
+        low.includes('homoafetiv') ||
+        low.includes('bissexual') ||
+        low.includes('pansexual') ||
+        low.includes('assexual') ||
+        low.includes('queer') ||
+        low.includes('lesbica') ||
+        low.includes('gay') ||
+        low.includes('lgbt') ||
+        (low.includes('orientacao') && low.includes('sexual'));
+      const looksLikeProjetoNarrativa =
+        compact.startsWith('oprojeto') ||
+        compact.startsWith('ocoletivo') ||
+        compact.startsWith('realizaremos') ||
+        compact.startsWith('otitulo') ||
+        compact.startsWith('odocumentario') ||
+        compact.startsWith('ocine') ||
+        compact.includes('consistenarealizacao') ||
+        compact.includes('objetivodoprojeto') ||
+        compact.includes('resumodoprojeto') ||
+        compact.includes('metodologia');
+      if (looksLikeProjetoNarrativa) return '';
+      const wordCount = low.split(' ').filter(Boolean).length;
+      if (!hasOrientacaoKeyword && wordCount >= 8) return '';
+      return txt;
+    };
+
+    /** Captura identidade de gênero mesmo quando a planilha usa rótulos/valores fora do padrão. */
+    const getIdentidadeGeneroValue = (row: any): string => {
+      const direto = findFieldValue(row, 'identidade_genero', 'Identidade de gênero', 'Identidade de genero').trim();
+      if (direto) return direto;
+      const candidates = Object.values(row || {})
+        .map((v) => String(v || '').trim())
+        .filter((v) => v && v.length <= 64);
+      const hit = candidates.find((val) => {
+        const low = val
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim();
+        return (
+          low.includes('travesti') ||
+          low.includes('nao binario') ||
+          low.includes('não binario') ||
+          low.includes('nao-binario') ||
+          low.includes('genero fluido') ||
+          low.includes('agenero') ||
+          low.includes('intersexo') ||
+          low.includes('bigenero') ||
+          low.includes('mulher trans') ||
+          low.includes('homem trans') ||
+          low.includes('transgener') ||
+          low.includes('transgener')
+        );
+      });
+      return hit || '';
+    };
+
     /** Eixos LGBTQIA+ distintos: orientação sexual e identidade/gênero são independentes (podem coexistir). */
     const lgbtAxesFrom = (a: any) => {
-      const orientacaoCampo = findFieldValue(a, 'orientacao_sexual', 'Orientação Sexual', 'sexualidade', 'orientacao');
+      const orientacaoCampo = sanitizeOrientacaoSexualValue(
+        findFieldValue(a, 'orientacao_sexual', 'Orientação Sexual', 'sexualidade', 'orientacao_sex')
+      );
       const generoSexoCampo = findFieldValue(a, 'genero_sexo', 'genero', 'sexo', 'Gênero', 'Sexo');
       const orientacao = `${orientacaoCampo} ${generoSexoCampo}`
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '');
-      const idGeneroCampo = findFieldValue(a, 'identidade_genero', 'Identidade de gênero', 'Identidade de genero')
+      const idGeneroCampo = getIdentidadeGeneroValue(a)
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '');
@@ -965,6 +1101,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
     const tipoPcdFromRaw = (raw: string): string => {
       const v = normalizeLooseKey(raw);
+      if (v === 'sim' || v === 's' || v === 'yes') return '';
+      if (v === 'nao' || v === 'não' || v === 'n') return '';
       if (v.includes('visual') || v.includes('cegueir') || v.includes('baixa vis')) return 'Visual / cegueira';
       if (v.includes('audit') || v.includes('surdez') || v.includes('surdo') || v.includes('surda')) return 'Auditiva / surdez';
       if (v.includes('fisic') || v.includes('motora') || v.includes('cadeira') || v.includes('ostom')) return 'Física / motora';
@@ -972,6 +1110,23 @@ export function HomePage({ onNavigate }: HomePageProps) {
       if (v.includes('multipl')) return 'Múltipla';
       if (v.includes('autismo') || v.includes('tea')) return 'TEA / autismo';
       return 'Outras / não especificado';
+    };
+
+    const pcdTipoDetalhadoFromRow = (row: any): string => {
+      if (!row || typeof row !== 'object') return '';
+      for (const [k, v] of Object.entries(row)) {
+        const kn = normalizeLooseKey(String(k || ''));
+        const looksLikeTipoField =
+          (kn.includes('pcd') && kn.includes('tipo')) ||
+          (kn.includes('deficiencia') && (kn.includes('tipo') || kn.includes('qual'))) ||
+          kn.includes('tipodedeficiencia');
+        if (!looksLikeTipoField) continue;
+        const raw = String(v || '').trim();
+        if (!raw) continue;
+        const mapped = tipoPcdFromRaw(raw);
+        if (mapped) return mapped;
+      }
+      return '';
     };
 
     const detectPovoReferencia = (a: any): string | null => {
@@ -997,7 +1152,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
     if (todosParaDiversidade.length > 0) {
       /** Só colunas de orientação sexual — evita misturar raça ou outros textos no gráfico de resumo. */
       const orientacaoClassBucket = (a: any): string => {
-        const orientacao = findFieldValue(a, 'orientacao_sexual', 'Orientação Sexual', 'sexualidade', 'orientacao')
+        const orientacao = sanitizeOrientacaoSexualValue(
+          findFieldValue(a, 'orientacao_sexual', 'Orientação Sexual', 'sexualidade', 'orientacao_sex')
+        )
           .toLowerCase()
           .normalize('NFD')
           .replace(/[\u0300-\u036f]/g, '')
@@ -1058,14 +1215,16 @@ export function HomePage({ onNavigate }: HomePageProps) {
           } else bump(pcdMap, 'Outro / ambíguo');
         }
 
-        const oriS = findFieldValue(a, 'orientacao_sexual', 'Orientação Sexual', 'sexualidade', 'orientacao').trim();
+        const oriS = sanitizeOrientacaoSexualValue(
+          findFieldValue(a, 'orientacao_sexual', 'Orientação Sexual', 'sexualidade', 'orientacao_sex')
+        ).trim();
         if (oriS) {
           const label = oriS.length > 36 ? `${oriS.slice(0, 33)}…` : oriS;
           bump(orientSexualMap, label);
         }
         bump(orientClassMap, orientacaoClassBucket(a));
 
-        const idg = findFieldValue(a, 'identidade_genero', 'Identidade de gênero', 'Identidade de genero').trim();
+        const idg = getIdentidadeGeneroValue(a).trim();
         if (idg) {
           const label = idg.length > 36 ? `${idg.slice(0, 33)}…` : idg;
           bump(identidadeGeneroMap, label);
@@ -1104,18 +1263,22 @@ export function HomePage({ onNavigate }: HomePageProps) {
           areas.forEach((areaItem) => bump(areaMap, areaItem));
         }
 
-        const ec = normalizeEstadoCivil(findEstadoCivil(a));
+        const ec = normalizeEstadoCivil(findEstadoCivil(a) || findEstadoCivilFallback(a));
         if (ec) {
           bump(estadoMap, ec);
           const cpfDig = String(findFieldValue(a, 'cpf', 'CPF', 'documento', 'Documento') || '').replace(/\D/g, '');
           if (cpfDig.length >= 11) cpfJaContouEstado.add(cpfDig);
         }
 
-        const rnda = findFieldValue(a, 'renda', 'Renda', 'faixa_renda', 'Faixa de renda', 'renda_familiar', 'Renda familiar').trim();
+        const rnda = (
+          findFieldValue(a, 'renda', 'Renda', 'faixa_renda', 'Faixa de renda', 'renda_familiar', 'Renda familiar').trim() ||
+          findRendaRawFallback(a)
+        );
         const rndaNorm = normalizeRendaFaixa(rnda);
         if (rndaNorm) bump(rendaMap, rndaNorm);
 
-        const exp = findFieldValue(
+        const exp = (
+          findFieldValue(
           a,
           'tempo_atuacao',
           'Tempo de atuação',
@@ -1124,7 +1287,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
           'Anos de atuação',
           'atuacao_cultural',
           'tempo de experiência'
-        ).trim();
+        ).trim() || findExperienciaRawFallback(a)
+        );
         if (exp) bump(expMap, exp.length > 32 ? `${exp.slice(0, 29)}…` : exp);
 
         const nat = findFieldValue(
@@ -1143,7 +1307,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
         if (povo) bump(povosMap, povo);
 
         if (isPcdDeclaracaoPositiva(String(rawPcd || ''))) {
-          bump(pcdTipoMap, tipoPcdFromRaw(String(rawPcd)));
+          const tipoPcd = pcdTipoDetalhadoFromRow(a) || tipoPcdFromRaw(String(rawPcd));
+          if (tipoPcd) bump(pcdTipoMap, tipoPcd);
         }
       });
 
@@ -1223,6 +1388,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
       diversityCharts = {
         totalBase: todosParaDiversidade.length,
+        lgbtqiaUniao: lgbtqia,
         genero: mapToArr(generoMap, 10),
         raca: mapToArr(racaMap, 10),
         pcd: mapToArr(pcdMap, 8),
@@ -1281,6 +1447,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
     const totalInscritosFinal = breakdownEditais.reduce((a, e) => a + e.inscritos, 0);
     const totalContempladosFinal = breakdownEditais.reduce((a, e) => a + e.contemplados, 0);
     const totalValorFinal = breakdownEditais.reduce((a, e) => a + e.valor, 0);
+
+    const totaisPublicos = computeEstatisticasPublicas({
+      agentes: agentesImportados,
+      grupos: gruposImportados,
+      espacos: espacosImportados,
+      projetos: editaisImportados,
+      mapeamento: baseMapeamento,
+    });
     
     // Adiciona IDs únicos para cada edital (previne warnings de keys duplicadas no React/Recharts)
     breakdownEditais.forEach((ed, idx) => {
@@ -1292,6 +1466,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       totalInscritos: totalInscritosFinal,
       totalValor: totalValorFinal,
       totalValorBrl: formatBRL(totalValorFinal),
+      totaisPublicos,
       qtdEditais: breakdownEditais.length,
       trad,
       percTrad,
@@ -1332,7 +1507,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
         ...(parsed.espacos || []),
         ...(Array.isArray(parsed.mapeamento) ? parsed.mapeamento : []),
       ];
-      const projetos = (parsed.projetos || parsed.editais || []) as any[];
+      const projetos = (parsed.projetos || []) as any[];
       
       const labelBairroCadastro = (item: any): string => {
         const end = String(
@@ -1396,7 +1571,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
     if (raw) {
       try {
         const parsed = normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>;
-        projetos = parsed.projetos || parsed.editais || [];
+        projetos = parsed.projetos || [];
       } catch {
         /* ignore */
       }
@@ -1427,7 +1602,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
     if (!raw) return [];
     try {
       const parsed = normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>;
-      const projetos = (parsed.projetos || parsed.editais || []) as any[];
+      const projetos = (parsed.projetos || []) as any[];
       if (projetos.length === 0) return [];
       const anoMap = new Map<number, number>();
       projetos.forEach((p: any) => {
@@ -1462,24 +1637,41 @@ export function HomePage({ onNavigate }: HomePageProps) {
     if (!raw) return [];
     try {
       const parsed = normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>;
-      const projetos = (parsed.projetos || parsed.editais || []) as any[];
+      const projetos = (parsed.projetos || []) as any[];
       if (projetos.length === 0) return [];
       const catMap = new Map<string, { qtd: number; valor: number }>();
       projetos.forEach((p: any) => {
-        const cat = (p.areaAtuacao || p.categoria || p.area || p.Categoria || 'Outros').toString().trim();
-        if (!cat || cat === '-') return;
-        const current = catMap.get(cat) || { qtd: 0, valor: 0 };
-        current.qtd += 1;
+        const rawCat = (p.areaAtuacao || p.categoria || p.area || p.Categoria || '').toString().trim();
+        const categories = splitAreaTokens(rawCat);
+        if (categories.length === 0) {
+          // Fallback seguro: só classifica como "Outros" quando não há texto util de linguagem.
+          const normalized = normalizeLooseKey(rawCat);
+          const looksLikeNoise =
+            !normalized ||
+            normalized === '-' ||
+            normalized.includes('modulo') ||
+            normalized.includes('módulo') ||
+            normalized.includes('faixa') ||
+            normalized.includes('projetos com valor') ||
+            normalized.includes('demais areas culturais') ||
+            normalized.includes('demais áreas culturais') ||
+            /r\$\s*\d/.test(rawCat.toLowerCase());
+          if (looksLikeNoise) return;
+          categories.push('Outros');
+        }
         const st = (p.status || p.Status || '').toLowerCase();
         const isContemp =
           st.includes('contemplado') ||
           st.includes('aprovado') ||
           st.includes('classificado') ||
           st.includes('selecionado');
-        if (isContemp) {
-          current.valor += parseBRLValue(p.valor || p.Valor || p.value || 0);
+        const valorProjeto = isContemp ? parseBRLValue(p.valor || p.Valor || p.value || 0) : 0;
+        for (const cat of categories) {
+          const current = catMap.get(cat) || { qtd: 0, valor: 0 };
+          current.qtd += 1;
+          current.valor += valorProjeto;
+          catMap.set(cat, current);
         }
-        catMap.set(cat, current);
       });
       const arr = Array.from(catMap.entries())
         .map(([nome, data]) => ({ nome, ...data }))
@@ -1519,11 +1711,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
     }));
   }, [distribuicaoPorBairro]);
 
-  /** Altura proporcional ao número de barras (evita cortar o gráfico quando há muitos bairros). */
+  /** Altura controlada (evita gráfico desproporcional com muitos bairros). */
   const bairrosChartHeight = useMemo(() => {
     const n = distribuicaoPorBairro.length;
     if (n === 0) return 280;
-    return Math.max(280, n * 26 + 56);
+    return Math.min(520, Math.max(320, n * 16 + 64));
   }, [distribuicaoPorBairro.length]);
 
   const bairrosYAxisWidth = useMemo(() => {
@@ -1545,14 +1737,60 @@ export function HomePage({ onNavigate }: HomePageProps) {
     }));
   }, [resumoGlobal.breakdownEditais]);
 
-  if (!isMounted) return <div className="min-h-screen bg-[#f8f9fa]" />;
+  /** Rosca: contemplados vs inscritos não contemplados (soma do breakdown por edital — mesma base do Admin) */
+  const ofertaDemandaPieData = useMemo(() => {
+    const rows = resumoGlobal.breakdownEditais || [];
+    const i = rows.reduce((a, e) => a + (Number(e.inscritos) || 0), 0);
+    const c = rows.reduce((a, e) => a + (Number(e.contemplados) || 0), 0);
+    const nao = Math.max(0, i - c);
+    if (c === 0 && nao === 0) return [];
+    return [
+      { name: 'Contemplados', value: c, _id: 'pie-c' },
+      { name: 'Inscritos (não contemplados)', value: nao, _id: 'pie-nc' },
+    ].filter((x) => x.value > 0);
+  }, [resumoGlobal.breakdownEditais]);
+
+  /** Pizza: distribuição de gênero (base diversidade) */
+  const generoPieData = useMemo(() => {
+    const m = resumoGlobal.mulheres;
+    const h = resumoGlobal.homens;
+    const o = Math.max(0, resumoGlobal.totalDiversidade - m - h);
+    const rows = [
+      { name: 'Mulheres', value: m, _id: 'g-m' },
+      { name: 'Homens', value: h, _id: 'g-h' },
+      { name: 'Outros / NI', value: o, _id: 'g-o' },
+    ].filter((x) => x.value > 0);
+    return rows;
+  }, [resumoGlobal.mulheres, resumoGlobal.homens, resumoGlobal.totalDiversidade]);
+
+  /** Pizza: investimento por edital (top 5 + demais) */
+  const editalValorPieData = useMemo(() => {
+    const rows = resumoGlobal.breakdownEditais || [];
+    if (!rows.length) return [];
+    const sorted = [...rows].sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0));
+    const top = sorted.slice(0, 5);
+    const total = sorted.reduce((a, e) => a + (Number(e.valor) || 0), 0);
+    const topSum = top.reduce((a, e) => a + (Number(e.valor) || 0), 0);
+    const rest = Math.max(0, total - topSum);
+    const out = top.map((e, idx) => ({
+      name: e.nome.length > 18 ? `${e.nome.slice(0, 16)}…` : e.nome,
+      value: Number(e.valor) || 0,
+      _id: `vp-${idx}`,
+    }));
+    if (rest > 0 && sorted.length > 5) {
+      out.push({ name: 'Demais editais', value: rest, _id: 'vp-rest' });
+    }
+    return out.filter((x) => x.value > 0);
+  }, [resumoGlobal.breakdownEditais]);
+
+  if (!isMounted) return <div className="min-h-screen ds-dash-page" />;
 
   return (
-    <div className="bg-[#f8f9fa] min-h-screen pb-20 font-sans text-[#1b1b1f]">
-      {/* Hero Section - Cadastro Cultural (min-height com vídeo evita o bloco KPI “subir” sobre o fundo) */}
+    <div className="ds-dash-page min-h-screen pb-20 font-sans text-[#1b1b1f]">
+      {/* Hero — painel executivo (dados dos KPIs permanecem abaixo, inalterados) */}
       <section
-        className={`relative overflow-hidden bg-gradient-to-br from-blue-50 via-white to-blue-50 text-[#1b1b1f] ${
-          showHeroVideo ? 'min-h-0 pb-2 md:pb-3' : ''
+        className={`relative overflow-hidden border-b border-slate-800/40 ${
+          showHeroVideo ? 'min-h-0 pb-0 md:pb-0' : ''
         }`}
       >
         {showHeroVideo && (
@@ -1560,12 +1798,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
             className="pointer-events-none absolute inset-0 z-0"
             initial={{ opacity: 0 }}
             animate={{ opacity: heroVideoReady ? 1 : 0 }}
-            transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1] }}
           >
             <video
               key={`${heroVideoIndex}-${heroVideoSrc}`}
               ref={heroVideoRef}
-              className="h-full min-h-[10.5rem] w-full object-cover brightness-[1.03] contrast-[1.02] sm:min-h-[12.5rem] md:min-h-[13rem]"
+              className="h-full min-h-[11rem] w-full scale-[1.02] object-cover sm:min-h-[13rem] md:min-h-[15rem]"
               src={heroVideoSrc ?? undefined}
               autoPlay
               muted
@@ -1578,156 +1816,171 @@ export function HomePage({ onNavigate }: HomePageProps) {
               onEnded={handleHeroVideoEnded}
               onError={() => setHeroVideoFailed(true)}
             />
-            {/* Camadas leves: vídeo bem visível; texto continua legível com cartões brancos e sombra no título */}
-            <div
-              className="absolute inset-0 bg-gradient-to-b from-white/35 via-white/20 to-white/55"
-              aria-hidden
-            />
-            <div
-              className="absolute inset-0 bg-gradient-to-br from-blue-50/25 via-transparent to-blue-100/30"
-              aria-hidden
-            />
           </motion.div>
         )}
 
-        {/* Decorative background pattern */}
-        <div className="absolute inset-0 z-[1] opacity-5">
-          <div className="absolute top-0 left-0 w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl"></div>
-          <div className="absolute bottom-0 right-0 w-96 h-96 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl"></div>
-        </div>
+        {!showHeroVideo && (
+          <div
+            className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent),linear-gradient(165deg,#070b14_0%,#0f172a_45%,#0c1a33_100%)]"
+            aria-hidden
+          />
+        )}
 
-        <div className="container relative z-10 mx-auto px-6 py-5 md:py-7">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
+        <div
+          className={`absolute inset-0 z-[1] ${
+            showHeroVideo
+              ? 'bg-gradient-to-b from-slate-950/90 via-slate-950/84 to-slate-950/93'
+              : 'bg-slate-950/20'
+          }`}
+          aria-hidden
+        />
+
+        <div
+          className="pointer-events-none absolute inset-0 z-[2] opacity-[0.06]"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(255,255,255,0.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.14) 1px, transparent 1px)',
+            backgroundSize: '56px 56px',
+          }}
+          aria-hidden
+        />
+
+        <div className="container relative z-10 mx-auto px-6 pb-10 pt-10 md:pb-12 md:pt-14 lg:pt-16">
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            className="max-w-4xl mx-auto text-center"
+            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+            className="max-w-3xl"
           >
-            <div
-              className={`mb-2.5 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-wider shadow-sm sm:text-xs ${
-                showHeroVideo
-                  ? 'border-white/40 bg-white/10 text-slate-800 backdrop-blur-md'
-                  : 'border-gray-200 bg-white/90 text-gray-800 backdrop-blur-sm'
-              }`}
-            >
-              <ShieldCheck size={16} className="text-[#0b57d0]" /> 
-              Sistema Municipal de Informações e Indicadores Culturais
-            </div>
-
-            <h1
-              className="mb-2.5 text-3xl font-black leading-tight tracking-tight text-[#1b1b1f] sm:text-4xl md:mb-3 md:text-5xl"
-              style={
-                showHeroVideo
-                  ? {
-                      textShadow:
-                        '0 0 1px rgba(255,255,255,1), 0 1px 20px rgba(255,255,255,0.95), 0 2px 40px rgba(255,255,255,0.65)',
-                    }
-                  : undefined
-              }
-            >
-              Cadastro Cultural de <br/>
-              <span className={`text-[#0b57d0] ${showHeroVideo ? 'drop-shadow-[0_1px_14px_rgba(255,255,255,0.9)]' : ''}`}>
-                Ilhabela
+            <div className="mb-4 inline-flex flex-wrap items-center gap-2 rounded-full border border-white/15 bg-white/[0.07] px-3.5 py-1.5 text-[0.68rem] font-bold uppercase tracking-[0.14em] text-slate-200 backdrop-blur-md sm:text-[0.72rem]">
+              <ShieldCheck size={15} className="shrink-0 text-sky-300" aria-hidden />
+              <span className="text-slate-100/95">SMIIC</span>
+              <span className="hidden text-white/25 sm:inline" aria-hidden>
+                ·
               </span>
-            </h1>
-
-            <div
-              className={`mx-auto mb-4 max-w-3xl rounded-2xl border p-3 sm:p-4 ${
-                showHeroVideo
-                  ? 'border-white/35 bg-transparent backdrop-blur-md shadow-none'
-                  : 'border-gray-200 bg-white/90 shadow-lg backdrop-blur-md'
-              }`}
-            >
-              <p
-                className={`text-sm font-medium leading-relaxed sm:text-base md:text-[0.98rem] ${
-                  showHeroVideo ? 'text-white' : 'text-slate-600'
-                }`}
-                style={
-                  showHeroVideo
-                    ? {
-                        textShadow:
-                          '0 1px 2px rgba(0,0,0,0.85), 0 2px 14px rgba(0,0,0,0.65), 0 0 24px rgba(0,0,0,0.45)',
-                      }
-                    : undefined
-                }
-              >
-                A Prefeitura Municipal de Ilhabela, por meio da Secretaria Municipal de Cultura, com o apoio do Conselho Municipal de Políticas Culturais de Ilhabela realizou em 2020 o cadastro geral de artistas do município como grupos, bandas, coletivos e espaços culturais atuantes no município para a identificação e mapeamento dos profissionais que atuam no setor da cultura e da economia criativa local. Esse cadastramento atende a disposição do Sistema Municipal de Informações e Indicadores Culturais (SMIIC) e irá amparar as políticas públicas municipais.
-              </p>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <MapPin size={14} className="shrink-0 text-sky-300/90" aria-hidden />
+                Município de Ilhabela · Secretaria de Cultura
+              </span>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-3">
-              <Button 
+            <h1 className="text-[1.65rem] font-bold leading-[1.12] tracking-tight text-white sm:text-4xl md:text-5xl lg:text-[2.65rem]">
+              Painel de Indicadores Culturais
+            </h1>
+            <p className="mt-2 max-w-xl text-sm font-semibold text-sky-200/90 sm:text-base">
+              Cadastro Cultural — dados municipais em gráficos e indicadores
+            </p>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Button
                 onClick={() => onNavigate('painel')}
-                variant="contained" 
+                variant="contained"
                 size="large"
-                sx={{ 
-                  bgcolor: '#0b57d0', 
-                  color: 'white', 
-                  fontWeight: 800, 
-                  borderRadius: '12px', 
-                  textTransform: 'none', 
-                  px: 4.5, 
-                  py: 1.5, 
-                  fontSize: '0.95rem',
-                  boxShadow: '0 4px 12px rgba(11,87,208,0.3)',
-                  '&:hover': { bgcolor: '#174ea6', transform: 'translateY(-2px)', boxShadow: '0 8px 16px rgba(11,87,208,0.4)' }
+                sx={{
+                  bgcolor: '#ffffff',
+                  color: '#0f172a',
+                  fontWeight: 800,
+                  borderRadius: '10px',
+                  textTransform: 'none',
+                  px: 3.5,
+                  py: 1.35,
+                  fontSize: '0.92rem',
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+                  '&:hover': { bgcolor: '#f1f5f9', transform: 'translateY(-1px)' },
                 }}
                 endIcon={<ArrowRight />}
               >
-                Explorar Dashboard
+                Abrir painel analítico
               </Button>
-              <Button 
+              <Button
                 onClick={() => onNavigate('transparencia')}
-                variant="outlined" 
+                variant="outlined"
                 size="large"
-                sx={{ 
-                  color: '#0b57d0', 
-                  borderColor: '#0b57d0', 
-                  bgcolor: showHeroVideo ? 'rgba(255,255,255,0.22)' : 'white',
-                  backdropFilter: showHeroVideo ? 'blur(10px)' : 'none',
-                  fontWeight: 700, 
-                  borderRadius: '12px', 
-                  textTransform: 'none', 
-                  px: 4.5, 
-                  py: 1.5,
-                  fontSize: '0.95rem',
-                  borderWidth: '2px',
+                sx={{
+                  color: '#e2e8f0',
+                  borderColor: 'rgba(255,255,255,0.28)',
+                  bgcolor: 'rgba(255,255,255,0.04)',
+                  backdropFilter: 'blur(10px)',
+                  fontWeight: 700,
+                  borderRadius: '10px',
+                  textTransform: 'none',
+                  px: 3.5,
+                  py: 1.35,
+                  fontSize: '0.92rem',
+                  borderWidth: '1.5px',
                   '&:hover': {
-                    borderColor: '#174ea6',
-                    bgcolor: showHeroVideo ? 'rgba(255,255,255,0.38)' : '#f8f9fa',
-                    borderWidth: '2px',
+                    borderColor: 'rgba(255,255,255,0.45)',
+                    bgcolor: 'rgba(255,255,255,0.1)',
+                    borderWidth: '1.5px',
                   },
                 }}
                 endIcon={<FileText />}
               >
-                Transparência
+                Transparência e fontes
               </Button>
             </div>
           </motion.div>
         </div>
       </section>
 
-      {/* Painel de KPIs — dashboard cultural (margem reduzida para “Indicadores principais” entrar antes no viewport) */}
-      <section className="container relative z-10 mx-auto mb-12 mt-2 max-w-7xl px-6 md:mt-3">
-        <DashboardSectionHeader
-          kicker="Indicadores principais"
-          title="Panorama do ecossistema cultural"
-          description="KPIs consolidados a partir do cadastro municipal e dos editais importados. Use-os para acompanhar presença cadastral, seleções públicas, investimento e territorialidade."
-        />
-        <div className="rounded-[1.75rem] border border-slate-200/90 bg-white p-5 sm:p-6 md:p-8 shadow-[0_12px_40px_-14px_rgba(15,23,42,0.12)] ring-1 ring-slate-900/[0.03]">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:grid-flow-dense lg:grid-cols-6 lg:gap-5">
-            <motion.div className="min-w-0 lg:col-span-1" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+      {/* KPIs + gráficos principais — logo no início */}
+      <section className="container relative z-20 mx-auto -mt-6 mb-12 max-w-7xl px-6 md:-mt-10 md:mb-14">
+        <div className="ds-dash-panel overflow-hidden rounded-2xl ring-1 ring-slate-900/[0.03] md:rounded-3xl">
+          <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-slate-50/90 px-5 py-4 md:px-8 md:py-5">
+            <p className="ds-dash-kicker mb-1">Painel público</p>
+            <h2 className="text-lg font-extrabold tracking-tight text-slate-900 md:text-xl">
+              Indicadores ao vivo e análise gráfica
+            </h2>
+            <p className="mt-1 max-w-3xl text-xs font-medium leading-relaxed text-slate-600 sm:text-sm">
+              Cadastro no mapa de totais = apenas mapeamento cultural (deduplicado). Editais seguem o breakdown do Admin.
+            </p>
+          </div>
+          <div className="border-t border-slate-100/90 bg-slate-50/70 p-4 sm:p-5 md:p-7">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-12 lg:gap-5">
+            <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
               <KpiMetricCard
                 borderColor="#0b57d0"
                 iconBg="#eff6ff"
                 iconColor="#0b57d0"
                 icon={<Users size={22} strokeWidth={2.25} />}
-                chip={<Chip label="Cadastro" variant="outlined" size="small" sx={{ fontWeight: 700, fontSize: '0.65rem', borderColor: '#e2e8f0', color: '#64748b' }} />}
-                main={<p className="m-0 text-3xl sm:text-4xl font-black text-slate-900 tabular-nums tracking-tight">{resumoGlobal.inscricoesTotais}</p>}
-                subtitle="Agentes, grupos e espaços cadastrados"
+                chip={
+                  <Chip
+                    label="Mapeamento"
+                    variant="outlined"
+                    size="small"
+                    sx={{ fontWeight: 700, fontSize: '0.62rem', borderColor: '#e2e8f0', color: '#64748b' }}
+                  />
+                }
+                main={<p className="m-0 text-3xl sm:text-4xl font-black text-slate-900 tabular-nums tracking-tight">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.agentes, resumoGlobal.totalAgentes)}</p>}
+                subtitle="Agentes cadastrados no mapeamento cultural"
               />
             </motion.div>
 
-            <motion.div className="min-w-0 lg:col-span-1" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+            <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+              <KpiMetricCard
+                borderColor="#0d9488"
+                iconBg="#ecfeff"
+                iconColor="#0d9488"
+                icon={<Award size={22} strokeWidth={2.25} />}
+                chip={<Chip label="Mapeamento" variant="outlined" size="small" sx={{ fontWeight: 700, fontSize: '0.62rem', borderColor: '#e2e8f0', color: '#64748b' }} />}
+                main={<p className="m-0 text-3xl sm:text-4xl font-black text-slate-900 tabular-nums tracking-tight">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.grupos, resumoGlobal.totalGrupos)}</p>}
+                subtitle="Grupos e coletivos cadastrados no mapeamento"
+              />
+            </motion.div>
+
+            <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+              <KpiMetricCard
+                borderColor="#6366f1"
+                iconBg="#eef2ff"
+                iconColor="#6366f1"
+                icon={<Building2 size={22} strokeWidth={2.25} />}
+                chip={<Chip label="Mapeamento" variant="outlined" size="small" sx={{ fontWeight: 700, fontSize: '0.62rem', borderColor: '#e2e8f0', color: '#64748b' }} />}
+                main={<p className="m-0 text-3xl sm:text-4xl font-black text-slate-900 tabular-nums tracking-tight">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.espacos, resumoGlobal.totalEspacos)}</p>}
+                subtitle="Espaços culturais cadastrados no mapeamento"
+              />
+            </motion.div>
+
+            <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
               <KpiMetricCard
                 borderColor="#059669"
                 iconBg="#ecfdf5"
@@ -1735,18 +1988,22 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 icon={<Trophy size={22} strokeWidth={2.25} />}
                 chip={
                   <Chip
-                    label={resumoGlobal.totalInscritos > 0 ? `${resumoGlobal.totalInscritos} inscritos` : 'Oferta'}
+                    label={
+                      resumoGlobal.totaisPublicos.totalEditais > 0
+                        ? `${resumoGlobal.totaisPublicos.totalEditais} edital(is)`
+                        : 'Editais'
+                    }
                     variant="outlined"
                     size="small"
                     sx={{ fontWeight: 700, fontSize: '0.65rem', borderColor: '#e2e8f0', color: '#64748b' }}
                   />
                 }
-                main={<p className="m-0 text-3xl sm:text-4xl font-black text-slate-900 tabular-nums tracking-tight">{resumoGlobal.totalProjetos}</p>}
+                main={<p className="m-0 text-3xl sm:text-4xl font-black text-slate-900 tabular-nums tracking-tight">{resumoGlobal.totaisPublicos.totalContemplados}</p>}
                 subtitle="Projetos contemplados nos editais"
               />
             </motion.div>
 
-            <motion.div className="min-w-0 sm:col-span-2 lg:col-span-2" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+            <motion.div className="min-w-0 sm:col-span-2 xl:col-span-4" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
               <KpiMetricCard
                 borderColor="#e11d48"
                 iconBg="#fff1f2"
@@ -1755,26 +2012,26 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 chip={<Chip label="Investimento" variant="outlined" size="small" sx={{ fontWeight: 700, fontSize: '0.65rem', borderColor: '#e2e8f0', color: '#64748b' }} />}
                 main={
                   <p className="m-0 font-black text-slate-900 tabular-nums leading-tight tracking-tight break-words text-[1.35rem] min-[400px]:text-2xl sm:text-3xl lg:text-[1.85rem]">
-                    {resumoGlobal.totalValorBrl}
+                    {formatBRL(resumoGlobal.totaisPublicos.totalValorInvestido)}
                   </p>
                 }
                 subtitle="Recursos públicos destinados (contemplados)"
               />
             </motion.div>
 
-            <motion.div className="min-w-0 lg:col-span-1" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+            <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
               <KpiMetricCard
                 borderColor="#7c3aed"
                 iconBg="#f5f3ff"
                 iconColor="#7c3aed"
-                icon={<Building2 size={22} strokeWidth={2.25} />}
+                icon={<FileText size={22} strokeWidth={2.25} />}
                 chip={<Chip label="Chamadas" variant="outlined" size="small" sx={{ fontWeight: 700, fontSize: '0.65rem', borderColor: '#e2e8f0', color: '#64748b' }} />}
-                main={<p className="m-0 text-3xl sm:text-4xl font-black text-slate-900 tabular-nums tracking-tight">{resumoGlobal.qtdEditais}</p>}
-                subtitle="Editais com dados na base"
+                main={<p className="m-0 text-3xl sm:text-4xl font-black text-slate-900 tabular-nums tracking-tight">{resumoGlobal.totaisPublicos.totalEditais}</p>}
+                subtitle="Editais distintos nos projetos (Transparência)"
               />
             </motion.div>
 
-            <motion.div className="min-w-0 lg:col-span-1" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+            <motion.div className="min-w-0 sm:col-span-2 xl:col-span-4" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
               <KpiMetricCard
                 borderColor="#d97706"
                 iconBg="#fffbeb"
@@ -1800,6 +2057,322 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 subtitle="Comunidades da lista oficial municipal (Ilhabela, SP) usada no cadastro"
               />
             </motion.div>
+          </div>
+          </div>
+
+          <div className="min-w-0 border-t border-slate-100 bg-white px-4 py-5 sm:px-6 md:px-7 md:py-6">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Análise gráfica</p>
+            <h3 className="mb-4 text-base font-black text-slate-800 tracking-tight">Evolução, editais e linguagens culturais</h3>
+            <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5">
+              <Card key="card-evolucao-line-lead" sx={{ ...chartCardSx, minWidth: 0, overflow: 'hidden' }}>
+                <CardContent className="p-4 md:p-5">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0]">Investimento</p>
+                  <h3 className="mb-0.5 text-sm font-bold text-[#0f172a] md:text-base">Evolução do investimento</h3>
+                  <p className="mb-3 text-[11px] text-slate-500">Valores contemplados por ano</p>
+                  <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT}>
+                    {evolucaoInvestimentoCharts.length > 0 ? (
+                      <ComposedChart
+                        key="evolucao-composed-lead"
+                        data={evolucaoComIds}
+                        syncId={`evolucaoLineLead-${chartUid}`}
+                        margin={{ top: 4, right: 6, left: 0, bottom: 0 }}
+                      >
+                        <defs>
+                          <linearGradient id={`homeFillEvolLead-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.22} />
+                            <stop offset="100%" stopColor={CORES_CADASTRO.principal} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis dataKey="ano" tick={{ fontSize: 10, fill: '#64748b', fontWeight: 600 }} axisLine={false} tickLine={false} dy={6} />
+                        <YAxis
+                          tick={{ fontSize: 10, fill: '#64748b', fontWeight: 600 }}
+                          axisLine={false}
+                          tickLine={false}
+                          tickFormatter={(value) => `${value / 1000}k`}
+                          width={40}
+                        />
+                        <RechartsTooltip contentStyle={chartTooltipContentStyle} formatter={(value: any) => formatBRL(value)} />
+                        <Area type="monotone" dataKey="valor" stroke="none" fill={`url(#homeFillEvolLead-${chartUid})`} isAnimationActive={false} />
+                        <Line
+                          type="monotone"
+                          dataKey="valor"
+                          stroke={CORES_CADASTRO.principal}
+                          strokeWidth={2.25}
+                          dot={{ fill: CORES_CADASTRO.principal, strokeWidth: 0, r: 3 }}
+                          activeDot={{ r: 5, fill: CORES_CADASTRO.principal, strokeWidth: 2, stroke: '#fff' }}
+                          name="Valor investido"
+                        />
+                      </ComposedChart>
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <p className="text-center text-xs font-medium text-slate-300">
+                          Aguardando importação
+                          <br />
+                          de dados
+                        </p>
+                      </div>
+                    )}
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              <Card key="card-breakdown-bar-lead" sx={{ ...chartCardSx, minWidth: 0, overflow: 'hidden' }}>
+                <CardContent className="p-4 md:p-5">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0]">Editais</p>
+                  <h3 className="mb-0.5 text-sm font-bold text-[#0f172a] md:text-base">Contemplados por edital</h3>
+                  <p className="mb-2 text-[11px] text-slate-500">Projetos aprovados · valor investido (R$)</p>
+                  <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT}>
+                    {breakdownComIds.length > 0 ? (
+                      <BarChart
+                        key="breakdown-bar-chart-lead"
+                        data={breakdownComIds}
+                        margin={{ top: 4, right: 6, left: 0, bottom: 0 }}
+                        barCategoryGap="28%"
+                        barGap={3}
+                      >
+                        <defs>
+                          <linearGradient id={`homeGradContLead-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#db2777" stopOpacity={0.9} />
+                            <stop offset="100%" stopColor="#db2777" stopOpacity={0.65} />
+                          </linearGradient>
+                          <linearGradient id={`homeGradValorLead-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.9} />
+                            <stop offset="100%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.65} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis
+                          dataKey="nome"
+                          tick={{ fontSize: 8, fill: '#64748b', fontWeight: 600 }}
+                          axisLine={false}
+                          tickLine={false}
+                          dy={6}
+                          interval={0}
+                        />
+                        <YAxis
+                          yAxisId="left"
+                          tick={{ fontSize: 9, fill: '#db2777', fontWeight: 600 }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={28}
+                          allowDecimals={false}
+                        />
+                        <YAxis
+                          yAxisId="right"
+                          orientation="right"
+                          tick={{ fontSize: 9, fill: CORES_CADASTRO.principal, fontWeight: 600 }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={44}
+                          tickFormatter={(v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : `${Math.round(v / 1000)}k`)}
+                        />
+                        <RechartsTooltip
+                          contentStyle={chartTooltipContentStyle}
+                          formatter={(value: number, name: string) =>
+                            name === 'Valor (R$)' ? formatBRL(value) : value
+                          }
+                          cursor={{ fill: 'rgba(11,87,208,0.05)', radius: 6 }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: 4 }} iconType="circle" iconSize={7} />
+                        <Bar
+                          yAxisId="left"
+                          dataKey="contemplados"
+                          fill={`url(#homeGradContLead-${chartUid})`}
+                          radius={[5, 5, 0, 0]}
+                          maxBarSize={22}
+                          name="Contemplados"
+                          isAnimationActive={false}
+                        />
+                        <Bar
+                          yAxisId="right"
+                          dataKey="valor"
+                          fill={`url(#homeGradValorLead-${chartUid})`}
+                          radius={[5, 5, 0, 0]}
+                          maxBarSize={22}
+                          name="Valor (R$)"
+                          isAnimationActive={false}
+                        />
+                      </BarChart>
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <p className="text-center text-xs font-medium text-slate-300">
+                          Aguardando importação
+                          <br />
+                          de dados
+                        </p>
+                      </div>
+                    )}
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              <Card key="card-categoria-bar-lead" sx={{ ...chartCardSx, minWidth: 0, overflow: 'hidden' }}>
+                <CardContent className="p-4 md:p-5">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0]">Linguagens</p>
+                  <h3 className="mb-0.5 text-sm font-bold text-[#0f172a] md:text-base">Por categoria</h3>
+                  <p className="mb-3 text-[11px] text-slate-500">Volume de projetos</p>
+                  <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT}>
+                    {categoriasCharts.length > 0 ? (
+                      <BarChart
+                        key="categoria-bar-chart-lead"
+                        data={categoriasComIds}
+                        syncId={`categoriaBarLead-${chartUid}`}
+                        margin={{ top: 2, right: 6, left: 0, bottom: 2 }}
+                      >
+                        <defs>
+                          <linearGradient id={`homeGradCatLead-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={CORES_CADASTRO.secundario} stopOpacity={1} />
+                            <stop offset="100%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.85} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis
+                          dataKey="nome"
+                          tick={{ fontSize: 8, fill: '#64748b', fontWeight: 600 }}
+                          angle={-38}
+                          textAnchor="end"
+                          height={64}
+                          interval={0}
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <YAxis tick={{ fontSize: 10, fill: '#64748b', fontWeight: 600 }} axisLine={false} tickLine={false} width={26} />
+                        <RechartsTooltip contentStyle={chartTooltipContentStyle} cursor={{ fill: 'rgba(11, 87, 208, 0.06)' }} />
+                        <Bar dataKey="qtd" fill={`url(#homeGradCatLead-${chartUid})`} radius={[6, 6, 0, 0]} maxBarSize={32} name="Projetos" />
+                      </BarChart>
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <p className="text-center text-xs font-medium text-slate-300">
+                          Aguardando importação
+                          <br />
+                          de dados
+                        </p>
+                      </div>
+                    )}
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              <div className="col-span-full mt-2 border-t border-slate-100 pt-6">
+                <div className="mb-5 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-gradient-to-r from-transparent to-slate-100" />
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400 shrink-0">
+                    Perfil e seleção
+                  </p>
+                  <div className="h-px flex-1 bg-gradient-to-l from-transparent to-slate-100" />
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-5">
+                  <Card sx={chartCardSx}>
+                    <CardContent className="p-4 md:p-5">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-violet-600">Oferta</p>
+                      <h3 className="mb-0.5 text-sm font-bold text-slate-900 md:text-base">Seleção pública</h3>
+                      <p className="mb-2 text-[11px] text-slate-500">Contemplados vs. fila de inscritos</p>
+                      <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT + 24}>
+                        {ofertaDemandaPieData.length > 0 ? (
+                          <PieChart>
+                            <Pie
+                              data={ofertaDemandaPieData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={52}
+                              outerRadius={76}
+                              paddingAngle={2}
+                              stroke="#fff"
+                              strokeWidth={2}
+                            >
+                              {ofertaDemandaPieData.map((entry, i) => (
+                                <Cell key={entry._id} fill={CHART_VIVID[i % CHART_VIVID.length]} />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip contentStyle={chartTooltipContentStyle} />
+                            <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 600 }} iconType="circle" iconSize={8} />
+                          </PieChart>
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs font-medium text-slate-400">
+                            Importe planilhas com inscritos e contemplados
+                          </div>
+                        )}
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  <Card sx={chartCardSx}>
+                    <CardContent className="p-4 md:p-5">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-fuchsia-600">Perfil</p>
+                      <h3 className="mb-0.5 text-sm font-bold text-slate-900 md:text-base">Gênero declarado</h3>
+                      <p className="mb-2 text-[11px] text-slate-500">Universo usado nos indicadores de diversidade</p>
+                      <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT + 24}>
+                        {generoPieData.length > 0 ? (
+                          <PieChart>
+                            <Pie
+                              data={generoPieData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={52}
+                              outerRadius={76}
+                              paddingAngle={2}
+                              stroke="#fff"
+                              strokeWidth={2}
+                            >
+                              {generoPieData.map((entry, i) => (
+                                <Cell key={entry._id} fill={CHART_VIVID[(i + 2) % CHART_VIVID.length]} />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip contentStyle={chartTooltipContentStyle} />
+                            <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 600 }} iconType="circle" iconSize={8} />
+                          </PieChart>
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs font-medium text-slate-400">
+                            Sem colunas de gênero classificáveis na base
+                          </div>
+                        )}
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  <Card sx={chartCardSx}>
+                    <CardContent className="p-4 md:p-5">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-600">Orçamento</p>
+                      <h3 className="mb-0.5 text-sm font-bold text-slate-900 md:text-base">Investimento por edital</h3>
+                      <p className="mb-2 text-[11px] text-slate-500">Top 5 + demais (valores contemplados)</p>
+                      <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT + 24}>
+                        {editalValorPieData.length > 0 ? (
+                          <PieChart>
+                            <Pie
+                              data={editalValorPieData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={48}
+                              outerRadius={76}
+                              paddingAngle={1.5}
+                              stroke="#fff"
+                              strokeWidth={2}
+                            >
+                              {editalValorPieData.map((entry, i) => (
+                                <Cell key={entry._id} fill={CHART_VIVID[(i + 1) % CHART_VIVID.length]} />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip contentStyle={chartTooltipContentStyle} formatter={(v: number) => formatBRL(v)} />
+                            <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 600 }} iconType="circle" iconSize={7} />
+                          </PieChart>
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs font-medium text-slate-400">
+                            Sem breakdown de editais com valores
+                          </div>
+                        )}
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -1918,12 +2491,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
       )}
 
       {/* 🆕 NOVA SEÇÃO: Indicadores de Diversidade e Inclusão */}
-      {(resumoGlobal.inscricoesTotais > 0 || resumoGlobal.totalInscritos > 0) && (
+      {(resumoGlobal.totaisPublicos.totalInscritos > 0 || resumoGlobal.totalInscritos > 0) && (
         <section className="container mx-auto px-6 mb-16 max-w-7xl">
           <DashboardSectionHeader
             kicker="Inclusão e perfil"
             title="Indicadores de diversidade"
-            description="Perfil agregado de agentes, grupos, espaços e proponentes. Cor/raça (negros e pardos) e LGBTQIA+ são eixos diferentes: o primeiro usa só autodeclaração de cor ou raça; o segundo usa orientação sexual, identidade de gênero e gênero — sem misturar um no outro. O total de PcD prioriza colunas de deficiência ou PcD e evita “Sim” genérico de outras perguntas."
+            description="Perfil agregado de agentes, grupos e espaços do cadastro cultural. Cor/raça (negros e pardos) e LGBTQIA+ são eixos diferentes: o primeiro usa só autodeclaração de cor ou raça; o segundo usa orientação sexual, identidade de gênero e gênero — sem misturar um no outro. O total de PcD prioriza colunas de deficiência ou PcD e evita “Sim” genérico de outras perguntas."
           />
           
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -2470,197 +3043,28 @@ export function HomePage({ onNavigate }: HomePageProps) {
       <section className="container mx-auto px-6 mb-16 max-w-7xl">
         <DashboardSectionHeader
           kicker="Painel público"
-          title="Painel Público"
-          description="Evolução de investimento, aprovações por edital, categorias e distribuição geográfica — apenas a partir das planilhas importadas; sem dados de exemplo. Anos intermediários aparecem em zero quando não há contemplados naquele ano."
+          title="Território e investimento (detalhe)"
+          description="Mapa de Ilhabela (OpenStreetMap), distribuição por bairro e investimento anual — cartões no estilo de dashboards analíticos corporativos."
         />
-        
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 md:gap-6">
-          {/* Evolução de Investimento — área + linha (estilo dashboard) */}
-          <Card key="card-evolucao-line" sx={chartCardSx}>
-            <CardContent className="p-6">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0] mb-1">Investimento</p>
-              <h3 className="text-base font-bold text-[#0f172a] mb-1">Evolução do investimento</h3>
-              <p className="text-xs text-slate-500 mb-4">Valores contemplados por ano</p>
-              <ResponsiveContainer width="100%" height={220}>
-                {evolucaoInvestimentoCharts.length > 0 ? (
-                  <ComposedChart key="evolucao-composed" data={evolucaoComIds} syncId="evolucaoLine" margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id={`homeFillEvol-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.22} />
-                        <stop offset="100%" stopColor={CORES_CADASTRO.principal} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                    <XAxis
-                      dataKey="ano"
-                      tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      dy={8}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(value) => `${value / 1000}k`}
-                      width={44}
-                    />
-                    <RechartsTooltip contentStyle={chartTooltipContentStyle} formatter={(value: any) => formatBRL(value)} />
-                    <Area type="monotone" dataKey="valor" stroke="none" fill={`url(#homeFillEvol-${chartUid})`} isAnimationActive={false} />
-                    <Line
-                      type="monotone"
-                      dataKey="valor"
-                      stroke={CORES_CADASTRO.principal}
-                      strokeWidth={2.5}
-                      dot={{ fill: CORES_CADASTRO.principal, strokeWidth: 0, r: 4 }}
-                      activeDot={{ r: 6, fill: CORES_CADASTRO.principal, strokeWidth: 2, stroke: '#fff' }}
-                      name="Valor investido"
-                    />
-                  </ComposedChart>
-                ) : (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-slate-300 text-xs text-center font-medium">
-                      Aguardando importação<br />de dados
-                    </p>
-                  </div>
-                )}
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
 
-          {/* Por edital — eixos Y duplos (contagem vs. valor) */}
-          <Card key="card-breakdown-line" sx={chartCardSx}>
-            <CardContent className="p-6">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0] mb-1">Editais</p>
-              <h3 className="text-base font-bold text-[#0f172a] mb-1">Contemplados e investimento</h3>
-              <p className="text-xs text-slate-500 mb-2">Eixo esquerdo: quantidade · direito: valor (R$)</p>
-              <ResponsiveContainer width="100%" height={220}>
-                {breakdownComIds.length > 0 ? (
-                  <ComposedChart key="breakdown-composed" data={breakdownComIds} syncId="breakdownLine" margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                    <XAxis
-                      dataKey="nome"
-                      tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      dy={8}
-                      interval={0}
-                    />
-                    <YAxis
-                      yAxisId="left"
-                      tick={{ fontSize: 10, fill: '#db2777', fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      width={32}
-                      allowDecimals={false}
-                    />
-                    <YAxis
-                      yAxisId="right"
-                      orientation="right"
-                      tick={{ fontSize: 10, fill: CORES_CADASTRO.principal, fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      width={44}
-                      tickFormatter={(v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : `${Math.round(v / 1000)}k`)}
-                    />
-                    <RechartsTooltip
-                      contentStyle={chartTooltipContentStyle}
-                      formatter={(value: number, name: string) =>
-                        name === 'Valor (R$)' || name === 'Valor' ? formatBRL(value) : value
-                      }
-                    />
-                    <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 700, paddingTop: 8 }} iconType="circle" iconSize={8} />
-                    <Line
-                      yAxisId="left"
-                      type="monotone"
-                      dataKey="contemplados"
-                      stroke={CORES_CADASTRO.lpg}
-                      strokeWidth={2.5}
-                      dot={{ fill: CORES_CADASTRO.lpg, strokeWidth: 0, r: 4 }}
-                      activeDot={{ r: 6 }}
-                      name="Contemplados"
-                    />
-                    <Line
-                      yAxisId="right"
-                      type="monotone"
-                      dataKey="valor"
-                      stroke={CORES_CADASTRO.principal}
-                      strokeWidth={2}
-                      strokeDasharray="4 4"
-                      dot={{ fill: CORES_CADASTRO.principal, strokeWidth: 0, r: 3 }}
-                      name="Valor (R$)"
-                    />
-                  </ComposedChart>
-                ) : (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-slate-300 text-xs text-center font-medium">
-                      Aguardando importação<br />de dados
-                    </p>
-                  </div>
-                )}
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+        <div className="mt-4 space-y-5 md:space-y-6">
+          <InciclePanel
+            kicker="Mapa"
+            title="Ilhabela no território"
+            subtitle="Círculos proporcionais à quantidade de registros por bairro (somente onde há coordenadas na base de bairros)."
+            contentMinHeight={0}
+          >
+            <IlhabelaTerritoryMap bairros={distribuicaoPorBairro} height={320} />
+          </InciclePanel>
 
-          {/* Categoria — barras com gradiente */}
-          <Card key="card-categoria-bar" sx={chartCardSx}>
-            <CardContent className="p-6">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0] mb-1">Linguagens</p>
-              <h3 className="text-base font-bold text-[#0f172a] mb-1">Distribuição por categoria</h3>
-              <p className="text-xs text-slate-500 mb-4">Volume de projetos por área</p>
-              <ResponsiveContainer width="100%" height={220}>
-                {categoriasCharts.length > 0 ? (
-                  <BarChart key="categoria-bar-chart" data={categoriasComIds} syncId="categoriaBar" margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-                    <defs>
-                      <linearGradient id={`homeGradCat-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={CORES_CADASTRO.secundario} stopOpacity={1} />
-                        <stop offset="100%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.85} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                    <XAxis
-                      dataKey="nome"
-                      tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }}
-                      angle={-42}
-                      textAnchor="end"
-                      height={72}
-                      interval={0}
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      width={28}
-                    />
-                    <RechartsTooltip contentStyle={chartTooltipContentStyle} cursor={{ fill: 'rgba(11, 87, 208, 0.06)' }} />
-                    <Bar dataKey="qtd" fill={`url(#homeGradCat-${chartUid})`} radius={[8, 8, 0, 0]} maxBarSize={36} name="Projetos" />
-                  </BarChart>
-                ) : (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-slate-300 text-xs text-center font-medium">
-                      Aguardando importação<br />de dados
-                    </p>
-                  </div>
-                )}
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Segunda linha de gráficos */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 md:gap-6 mt-5 md:mt-6">
-          <Card key="card-bairro-bar" sx={chartCardSx}>
-            <CardContent className="p-6">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0] mb-1">Território</p>
-              <h3 className="text-base font-bold text-[#0f172a] mb-1">Distribuição geográfica</h3>
-              <p className="text-xs text-slate-500 mb-4">
-                Cadastro, mapeamento e proponentes com bairro/localidade identificável —{' '}
-                <strong className="text-slate-600">{distribuicaoPorBairro.length}</strong> localidade
-                {distribuicaoPorBairro.length === 1 ? '' : 's'} (todas ordenadas por quantidade).
-              </p>
-              <div className="max-h-[min(78vh,820px)] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-100/80 bg-slate-50/30">
+          <div className="grid grid-cols-1 gap-5 md:gap-6 lg:grid-cols-2">
+            <InciclePanel
+              kicker="Território"
+              title="Distribuição geográfica"
+              subtitle={`Cadastro, mapeamento e proponentes com bairro identificável — ${distribuicaoPorBairro.length} localidade${distribuicaoPorBairro.length === 1 ? '' : 's'} (ordenadas por quantidade).`}
+              contentMinHeight={bairrosChartHeight}
+            >
+              <div className="rounded-xl border border-slate-100/90 bg-slate-50/40">
                 <ResponsiveContainer width="100%" height={bairrosChartHeight} debounce={32}>
                   {distribuicaoPorBairro.length > 0 ? (
                     <BarChart key="bairro-bar-chart" data={bairrosComIds} layout="horizontal" syncId="bairroBar" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
@@ -2705,14 +3109,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   )}
                 </ResponsiveContainer>
               </div>
-            </CardContent>
-          </Card>
+            </InciclePanel>
 
-          <Card key="card-evolucao-bar" sx={chartCardSx}>
-            <CardContent className="p-6">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0] mb-1">Orçamento</p>
-              <h3 className="text-base font-bold text-[#0f172a] mb-1">Investimento anual</h3>
-              <p className="text-xs text-slate-500 mb-4">Total de recursos por ano</p>
+            <InciclePanel kicker="Orçamento" title="Investimento anual" subtitle="Total de recursos públicos contemplados por ano (dados importados)." contentMinHeight={300}>
               <ResponsiveContainer width="100%" height={280}>
                 {evolucaoInvestimentoCharts.length > 0 ? (
                   <BarChart key="evolucao-bar-chart" data={evolucaoComIds} syncId="evolucaoBar" margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
@@ -2744,8 +3143,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   </div>
                 )}
               </ResponsiveContainer>
-            </CardContent>
-          </Card>
+            </InciclePanel>
+          </div>
         </div>
       </section>
 
@@ -2788,220 +3187,127 @@ export function HomePage({ onNavigate }: HomePageProps) {
             </Typography>
           </Box>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {resumoGlobal.breakdownEditais.map((edital, idx) => {
-              const cores = ['#E30613', '#0b57d0', '#db2777', '#059669', '#7c3aed', '#ea580c'];
-              const cor = cores[idx % cores.length];
-              const anoMatch = edital.nome.match(/(\d{4})/);
-              const ano = anoMatch ? anoMatch[1] : '-';
-              const links = resolveEditalLinks(edital.nome, resumoGlobal.customEditalLinks);
-              const btnRadius = '999px';
-              const shadowMd = '0 1px 2px rgba(15,23,42,0.06), 0 8px 24px rgba(11, 87, 208, 0.14)';
-              const statPaper = (opts: { bg: string; border: string; label: string; value: React.ReactNode; valueColor: string }) => (
-                <Paper
-                  elevation={0}
-                  sx={{
-                    p: 1.75,
-                    borderRadius: 3,
-                    bgcolor: opts.bg,
-                    border: `1px solid ${opts.border}`,
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
-                    <Typography variant="caption" sx={{ fontFamily: 'inherit', fontWeight: 800, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.65rem' }}>
-                      {opts.label}
-                    </Typography>
-                    <Typography sx={{ fontFamily: 'inherit', fontWeight: 900, fontSize: '1.125rem', color: opts.valueColor, lineHeight: 1.2 }}>
-                      {opts.value}
-                    </Typography>
-                  </Stack>
-                </Paper>
-              );
-              return (
-                <motion.div
-                  key={`${edital.nome}-${idx}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.1 }}
-                >
-                  <Card
-                    sx={{
-                      fontFamily: 'inherit',
-                      borderRadius: '24px',
-                      height: '100%',
-                      border: '1px solid rgba(15, 23, 42, 0.06)',
-                      bgcolor: '#fff',
-                      boxShadow: '0 2px 4px rgba(15,23,42,0.04), 0 12px 32px rgba(15,23,42,0.08)',
-                      transition: 'box-shadow 0.25s ease, transform 0.25s ease',
-                      '&:hover': {
-                        boxShadow: '0 4px 8px rgba(15,23,42,0.06), 0 20px 48px rgba(11, 87, 208, 0.12)',
-                        transform: 'translateY(-3px)',
-                      },
-                    }}
+          <Card sx={{ borderRadius: '24px', border: '1px solid rgba(15, 23, 42, 0.07)', boxShadow: '0 10px 30px rgba(15,23,42,0.06)' }}>
+            <CardContent sx={{ p: { xs: 2, md: 3 }, fontFamily: 'inherit' }}>
+              <div className="h-[360px] w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={resumoGlobal.breakdownEditais.map((ed) => ({
+                      ...ed,
+                      nomeCurto: ed.nome.length > 30 ? `${ed.nome.slice(0, 29)}…` : ed.nome,
+                    }))}
+                    margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
                   >
-                    <CardContent sx={{ p: 3, fontFamily: 'inherit' }}>
-                      <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
-                        <Box
-                          sx={{
-                            minWidth: 52,
-                            height: 52,
-                            borderRadius: '18px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#fff',
-                            fontFamily: 'inherit',
-                            fontWeight: 900,
-                            fontSize: '1.05rem',
-                            background: `linear-gradient(145deg, ${cor} 0%, ${cor}cc 45%, #0f172a22 100%)`,
-                            boxShadow: `0 6px 16px ${cor}44`,
-                          }}
-                        >
-                          {ano}
-                        </Box>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
+                    <XAxis
+                      dataKey="nomeCurto"
+                      tick={{ fontSize: 10, fill: '#64748b', fontWeight: 600 }}
+                      axisLine={false}
+                      tickLine={false}
+                      interval={0}
+                      angle={-16}
+                      textAnchor="end"
+                      height={74}
+                    />
+                    <YAxis
+                      yAxisId="qtd"
+                      tick={{ fontSize: 10, fill: '#64748b', fontWeight: 600 }}
+                      axisLine={false}
+                      tickLine={false}
+                      allowDecimals={false}
+                      width={36}
+                    />
+                    <YAxis
+                      yAxisId="valor"
+                      orientation="right"
+                      tick={{ fontSize: 10, fill: '#0b57d0', fontWeight: 700 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`}
+                      width={58}
+                    />
+                    <RechartsTooltip
+                      contentStyle={chartTooltipContentStyle}
+                      labelFormatter={(_, payload: any) => String(payload?.[0]?.payload?.nome || '')}
+                      formatter={(value: number, name: string) => {
+                        if (name === 'Valor Investido') return formatBRL(value);
+                        return value;
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700, paddingTop: 8 }} iconType="circle" iconSize={8} />
+                    <Bar yAxisId="qtd" dataKey="inscritos" name="Inscritos" fill="#94a3b8" radius={[8, 8, 0, 0]} maxBarSize={26} />
+                    <Bar yAxisId="qtd" dataKey="contemplados" name="Contemplados" fill="#16a34a" radius={[8, 8, 0, 0]} maxBarSize={26} />
+                    <Line
+                      yAxisId="valor"
+                      type="monotone"
+                      dataKey="valor"
+                      name="Valor Investido"
+                      stroke="#0b57d0"
+                      strokeWidth={2.2}
+                      dot={{ r: 3, fill: '#0b57d0', strokeWidth: 0 }}
+                      activeDot={{ r: 5, fill: '#0b57d0', stroke: '#fff', strokeWidth: 2 }}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {resumoGlobal.breakdownEditais.map((edital) => {
+                  const links = resolveEditalLinks(edital.nome, resumoGlobal.customEditalLinks);
+                  if (!links || (!links.resultado && !links.resumo && !links.diarioOficial)) return null;
+                  return (
+                    <div key={`links-compact-${edital.nome}`} className="rounded-xl border border-slate-100 bg-slate-50/75 p-3">
+                      <p className="mb-2 text-xs font-black text-[#0b57d0]">{edital.nome}</p>
+                      <Stack direction="row" flexWrap="wrap" gap={1}>
+                        {links.resultado && (
+                          <Button
+                            component="a"
+                            href={links.resultado}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            variant="outlined"
+                            size="small"
+                            startIcon={<FileText size={14} />}
+                            sx={{ textTransform: 'none', borderRadius: '999px', fontWeight: 700 }}
+                          >
+                            Resultado
+                          </Button>
+                        )}
+                        {links.resumo && (
+                          <Button
+                            component="a"
+                            href={links.resumo}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            variant="outlined"
+                            size="small"
+                            startIcon={<BarChart3 size={14} />}
+                            sx={{ textTransform: 'none', borderRadius: '999px', fontWeight: 700 }}
+                          >
+                            Resumo
+                          </Button>
+                        )}
+                        {links.diarioOficial && (
+                          <Button
+                            component="a"
+                            href={links.diarioOficial}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            variant="text"
+                            size="small"
+                            startIcon={<ScrollText size={14} />}
+                            sx={{ textTransform: 'none', borderRadius: '999px', fontWeight: 700 }}
+                          >
+                            Diário Oficial
+                          </Button>
+                        )}
                       </Stack>
-
-                      <Typography
-                        component="h3"
-                        sx={{
-                          fontFamily: 'inherit',
-                          fontWeight: 800,
-                          fontSize: '1.05rem',
-                          color: '#0f172a',
-                          lineHeight: 1.35,
-                          minHeight: '3.15rem',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                          mb: 2,
-                        }}
-                      >
-                        {edital.nome}
-                      </Typography>
-
-                      <Stack spacing={1.5} sx={{ mb: links ? 2 : 0 }}>
-                        {statPaper({
-                          bg: 'rgba(248, 250, 252, 0.95)',
-                          border: 'rgba(148, 163, 184, 0.35)',
-                          label: 'Inscritos',
-                          value: edital.inscritos,
-                          valueColor: '#334155',
-                        })}
-                        {edital.valor > 0 &&
-                          statPaper({
-                            bg: 'rgba(236, 253, 245, 0.9)',
-                            border: 'rgba(16, 185, 129, 0.28)',
-                            label: 'Valor investido',
-                            value: formatBRL(edital.valor),
-                            valueColor: '#047857',
-                          })}
-                        {statPaper({
-                          bg: 'rgba(239, 246, 255, 0.95)',
-                          border: 'rgba(59, 130, 246, 0.28)',
-                          label: 'Contemplados',
-                          value: edital.contemplados,
-                          valueColor: '#1d4ed8',
-                        })}
-                      </Stack>
-
-                      {links && (links.resultado || links.resumo || links.diarioOficial) && (
-                        <Stack
-                          direction="row"
-                          flexWrap="wrap"
-                          sx={{
-                            gap: 1.25,
-                            pt: 2,
-                            mt: 0.5,
-                            borderTop: '1px solid rgba(15, 23, 42, 0.06)',
-                          }}
-                        >
-                          {links.resultado && (
-                            <Button
-                              component="a"
-                              href={links.resultado}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              variant="contained"
-                              size="medium"
-                              startIcon={<FileText size={18} />}
-                              endIcon={<ExternalLink size={16} />}
-                              sx={{
-                                fontFamily: 'inherit',
-                                borderRadius: btnRadius,
-                                textTransform: 'none',
-                                fontWeight: 800,
-                                px: 2.25,
-                                py: 1,
-                                fontSize: '0.8125rem',
-                                boxShadow: shadowMd,
-                                bgcolor: cor,
-                                '&:hover': { bgcolor: cor, filter: 'brightness(0.95)', boxShadow: shadowMd },
-                              }}
-                            >
-                              Resultado
-                            </Button>
-                          )}
-                          {links.resumo && (
-                            <Button
-                              component="a"
-                              href={links.resumo}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              variant="outlined"
-                              size="medium"
-                              startIcon={<BarChart3 size={18} />}
-                              endIcon={<ExternalLink size={16} />}
-                              sx={{
-                                fontFamily: 'inherit',
-                                borderRadius: btnRadius,
-                                textTransform: 'none',
-                                fontWeight: 800,
-                                px: 2.25,
-                                py: 1,
-                                fontSize: '0.8125rem',
-                                borderWidth: 2,
-                                borderColor: 'rgba(11, 87, 208, 0.45)',
-                                color: '#0b57d0',
-                                bgcolor: 'rgba(255,255,255,0.85)',
-                                '&:hover': { borderWidth: 2, borderColor: '#0b57d0', bgcolor: 'rgba(239,246,255,0.95)' },
-                              }}
-                            >
-                              Resumo
-                            </Button>
-                          )}
-                          {links.diarioOficial && (
-                            <Button
-                              component="a"
-                              href={links.diarioOficial}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              variant="text"
-                              size="medium"
-                              startIcon={<ScrollText size={18} />}
-                              endIcon={<ExternalLink size={16} />}
-                              sx={{
-                                fontFamily: 'inherit',
-                                borderRadius: btnRadius,
-                                textTransform: 'none',
-                                fontWeight: 700,
-                                px: 1.5,
-                                color: '#64748b',
-                                '&:hover': { bgcolor: 'rgba(15,23,42,0.04)', color: '#334155' },
-                              }}
-                            >
-                              Diário Oficial
-                            </Button>
-                          )}
-                        </Stack>
-                      )}
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              );
-            })}
-          </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
           </Box>
         </section>
       )}

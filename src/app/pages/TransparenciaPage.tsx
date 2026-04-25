@@ -8,6 +8,17 @@ import {
   Button, Card, CardContent, Typography, Divider, 
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip, Tooltip, Box
 } from '@mui/material';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  Bar,
+  Line,
+  Tooltip as RechartsTooltip,
+  Legend,
+} from 'recharts';
 
 import { formatBRL } from '../data/pnab-data';
 import { projectId, publicAnonKey } from '/utils/supabase/info';
@@ -22,6 +33,7 @@ import {
   pickRicherCadastroPayload,
 } from './admin/projetosDemandaOferta';
 import { findEditalLinks as resolveEditalLinks } from './admin/editalUtils';
+import { computeEstatisticasPublicas } from '../data/estatisticas-publicas';
 
 // Carrega links customizados salvos pelo Admin no mesmo payload principal.
 const getCustomEditalLinks = (): Record<string, { resultado?: string; resumo?: string; diarioOficial?: string }> => {
@@ -41,6 +53,15 @@ const getCustomEditalLinks = (): Record<string, { resultado?: string; resumo?: s
 
 export function TransparenciaPage() {
   const [serverData, setServerData] = useState<any>(null);
+  const chartTooltipStyle: React.CSSProperties = {
+    borderRadius: 12,
+    border: '1px solid #e2e8f0',
+    boxShadow: '0 10px 32px rgba(15,23,42,0.12)',
+    fontSize: 12,
+    fontWeight: 600,
+    padding: '10px 12px',
+    background: 'rgba(255,255,255,0.98)',
+  };
 
   // Carregar dados do servidor como fonte primaria
   useEffect(() => {
@@ -122,41 +143,24 @@ export function TransparenciaPage() {
       grupos: data.grupos || [],
       espacos: data.espacos || [],
       projetos: data.projetos || [],
+      mapeamento: Array.isArray(data.mapeamento) ? data.mapeamento : [],
       editalResumoOverrides: data.editalResumoOverrides || {},
       customEditalLinks: { ...getCustomEditalLinks(), ...fromServer },
     };
   }, [serverData]);
 
-  // Calcular totais reais DINAMICAMENTE dos projetos importados
-  const stats = useMemo(() => {
-    const totalMapeamento = dadosReais.agentes.length + dadosReais.grupos.length + dadosReais.espacos.length;
-    
-    // Projetos importados contemplados
-    const projetosImportados = dadosReais.projetos;
-    const contemImportados = projetosImportados.filter(isProjetoContemplado);
-    
-    // Valor dos importados (com parser BRL correto)
-    const valorImportados = contemImportados.reduce((acc: number, p: any) => acc + getProjetoValorNormalizado(p), 0);
-    
-    const totalContemplados = contemImportados.length;
-    const totalValorInvestido = valorImportados;
-    const totalInscritos = totalMapeamento + projetosImportados.length;
-    
-    // Contagem de editais unicos
-    const editaisSet = new Set<string>();
-    projetosImportados.forEach((p: any) => {
-      const ed = getEditalNomeExibicaoProjeto(p).trim();
-      if (ed && ed !== 'Edital não informado') editaisSet.add(ed);
-    });
-    return {
-      totalInscritos,
-      totalMapeamento,
-      totalContemplados,
-      totalValorInvestido,
-      totalEditais: editaisSet.size,
-      projetosImportados: projetosImportados.length,
-    };
-  }, [dadosReais]);
+  // Mesmos totais da home (KPIs) — função única em `estatisticas-publicas`
+  const stats = useMemo(
+    () =>
+      computeEstatisticasPublicas({
+        agentes: dadosReais.agentes,
+        grupos: dadosReais.grupos,
+        espacos: dadosReais.espacos,
+        projetos: dadosReais.projetos,
+        mapeamento: dadosReais.mapeamento,
+      }),
+    [dadosReais]
+  );
 
   // Timeline corrigida (sem "Lei Aldir Blanc II")
   const timelineData = [
@@ -235,6 +239,20 @@ export function TransparenciaPage() {
     }));
   }, [dadosReais]);
 
+  const breakdownEditaisChart = useMemo(() => {
+    return breakdownEditais.map((ed) => {
+      const links = resolveEditalLinks(ed.nome, dadosReais.customEditalLinks);
+      const nomeCurto = ed.nome.length > 28 ? `${ed.nome.slice(0, 27)}…` : ed.nome;
+      const taxa = ed.inscritos > 0 ? Math.round((ed.contemplados / ed.inscritos) * 100) : 0;
+      return {
+        ...ed,
+        nomeCurto,
+        taxa,
+        links,
+      };
+    });
+  }, [breakdownEditais, dadosReais.customEditalLinks]);
+
   const statsData = [
     { label: 'Inscricoes no Sistema', value: stats.totalInscritos > 0 ? stats.totalInscritos.toString() : '-', sub: 'Historico Acumulado', icon: <Search size={24} /> },
     { label: 'Contemplados', value: stats.totalContemplados > 0 ? stats.totalContemplados.toString() : '-', sub: `${stats.totalEditais} edital(is)`, icon: <CheckCircle2 size={24} /> },
@@ -243,110 +261,103 @@ export function TransparenciaPage() {
   ];
 
   return (
-    <div className="container mx-auto px-6 py-12 flex flex-col gap-16 bg-[#f8f9fa] min-h-screen">
-      <section className="text-center max-w-4xl mx-auto">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="inline-block px-4 py-1.5 rounded-full bg-[#0b57d0]/10 text-[#0b57d0] text-[0.7rem] font-black uppercase tracking-widest mb-4">
-            Transparencia Cultural - Ilhabela
-          </div>
-          <h1 className="text-5xl font-black text-[#0b57d0] mb-6">Dados Reais e Rankings</h1>
-          <p className="text-xl text-[#5f5f6a] leading-relaxed">
-            Consulte as estatisticas oficiais extraidas do Cadastro Cultural de Ilhabela. Informacoes atualizadas sobre editais e contemplados.
-          </p>
-        </motion.div>
-      </section>
+    <div className="container mx-auto min-w-0 px-6 py-8 flex flex-col gap-10 bg-[#f8f9fa] min-h-screen font-sans text-[#1b1b1f]">
+      <section className="min-w-0 rounded-2xl border border-[#9ec5ff] bg-white p-3 shadow-[0_1px_2px_rgba(11,87,208,0.08)]">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {statsData.map((stat) => (
+            <Card
+              key={stat.label}
+              sx={{
+                borderRadius: '10px',
+                border: '1px solid #93c5fd',
+                boxShadow: 'none',
+                minWidth: 0,
+              }}
+            >
+              <CardContent className="p-3 text-center">
+                <p className="m-0 text-[0.72rem] font-semibold text-slate-500">{stat.label}</p>
+                <p className="m-0 mt-1 text-3xl font-black leading-tight text-[#0b57d0]">{stat.value}</p>
+                <p className="m-0 mt-0.5 text-[0.68rem] font-semibold text-slate-500">{stat.sub}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
 
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {statsData.map((stat, i) => (
-          <Card key={stat.label} sx={{ borderRadius: '24px', border: '1px solid #e5e7eb', boxShadow: 'none' }}>
-            <CardContent className="p-8 flex flex-col items-center text-center">
-              <div className="w-14 h-14 bg-[#0b57d0]/10 rounded-2xl flex items-center justify-center text-[#0b57d0] mb-6">
-                {stat.icon}
-              </div>
-              <Typography variant="h4" fontWeight="900" color="#0b57d0">{stat.value}</Typography>
-              <Typography variant="subtitle2" fontWeight="700" color="#0b57d0" sx={{ opacity: 0.7 }}>{stat.label}</Typography>
-              <Typography variant="caption" color="textSecondary">{stat.sub}</Typography>
-            </CardContent>
-          </Card>
-        ))}
-      </section>
+        {breakdownEditais.length > 0 && (
+          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <Card sx={{ borderRadius: '10px', border: '1px solid #93c5fd', boxShadow: 'none' }}>
+              <CardContent className="p-3">
+                <p className="mb-1 text-xs font-bold text-slate-600">Inscritos x Contemplados</p>
+                <div className="h-[220px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={breakdownEditaisChart} margin={{ top: 6, right: 6, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
+                      <XAxis dataKey="nomeCurto" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }} interval={0} angle={-15} textAnchor="end" height={70} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="qtd" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} width={34} />
+                      <RechartsTooltip contentStyle={chartTooltipStyle} labelFormatter={(_, payload) => String(payload?.[0]?.payload?.nome || '')} />
+                      <Legend wrapperStyle={{ fontSize: 10, fontWeight: 700 }} iconType="circle" iconSize={8} />
+                      <Bar yAxisId="qtd" dataKey="inscritos" name="Inscritos" fill="#60a5fa" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                      <Bar yAxisId="qtd" dataKey="contemplados" name="Contemplados" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
 
-      {/* Breakdown por Edital */}
-      {breakdownEditais.length > 0 && (
-        <section>
-          <div className="flex items-center gap-3 mb-6">
-            <FileText className="text-[#0b57d0]" size={28} />
-            <h2 className="text-2xl font-black text-[#1b1b1f]">Detalhamento por Edital</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {breakdownEditais.map((ed, idx) => (
-              <Card key={ed.nome} sx={{ borderRadius: '20px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #f3f4f6' }}>
-                <CardContent className="p-6">
-                  <Chip label={ed.nome} size="small" sx={{ bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 700, mb: 2 }} />
-                  <div className="space-y-3 mt-3">
-                    <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                      <span className="text-xs font-semibold text-gray-600 uppercase">Inscritos</span>
-                      <span className="font-black text-gray-800">{ed.inscritos}</span>
-                    </div>
-                    <div className="flex justify-between items-center p-3 bg-green-50 rounded-xl">
-                      <span className="text-xs font-semibold text-green-700 uppercase">Contemplados</span>
-                      <span className="font-black text-green-600">{ed.contemplados}</span>
-                    </div>
-                    {ed.valor > 0 && (
-                      <div className="flex justify-between items-center p-3 bg-blue-50 rounded-xl">
-                        <span className="text-xs font-semibold text-blue-700 uppercase">Valor Investido</span>
-                        <span className="font-black text-blue-600">{formatBRL(ed.valor)}</span>
+            <Card sx={{ borderRadius: '10px', border: '1px solid #93c5fd', boxShadow: 'none' }}>
+              <CardContent className="p-3">
+                <p className="mb-1 text-xs font-bold text-slate-600">Valor Investido por Edital</p>
+                <div className="h-[220px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={breakdownEditaisChart} margin={{ top: 6, right: 8, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
+                      <XAxis dataKey="nomeCurto" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }} interval={0} angle={-15} textAnchor="end" height={70} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} width={44} />
+                      <RechartsTooltip contentStyle={chartTooltipStyle} formatter={(value: number) => formatBRL(value)} labelFormatter={(_, payload) => String(payload?.[0]?.payload?.nome || '')} />
+                      <Bar dataKey="valor" name="Valor Investido" fill="#2563eb" radius={[4, 4, 0, 0]} maxBarSize={24} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card sx={{ borderRadius: '10px', border: '1px solid #93c5fd', boxShadow: 'none' }}>
+              <CardContent className="p-3">
+                <p className="mb-1 text-xs font-bold text-slate-600">Taxa de contemplação por edital</p>
+                <div className="h-[220px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={breakdownEditaisChart} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
+                      <XAxis dataKey="nomeCurto" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }} interval={0} angle={-15} textAnchor="end" height={70} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} width={34} unit="%" />
+                      <RechartsTooltip contentStyle={chartTooltipStyle} formatter={(value: number) => `${value}%`} labelFormatter={(_, payload) => String(payload?.[0]?.payload?.nome || '')} />
+                      <Line type="monotone" dataKey="taxa" name="Taxa" stroke="#16a34a" strokeWidth={2.3} dot={{ r: 3, fill: '#16a34a', strokeWidth: 0 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card sx={{ borderRadius: '10px', border: '1px solid #93c5fd', boxShadow: 'none' }}>
+              <CardContent className="p-3">
+                <p className="mb-2 text-xs font-bold text-slate-600">Links por edital</p>
+                <div className="max-h-[220px] space-y-2 overflow-auto pr-1">
+                  {breakdownEditaisChart.map((ed) => (
+                    <div key={`links-${ed.nome}`} className="rounded-lg border border-slate-100 bg-slate-50/80 p-2">
+                      <p className="mb-1 text-[11px] font-bold text-[#0b57d0]">{ed.nome}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {ed.links?.resultado ? <a href={ed.links.resultado} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Resultado" size="small" clickable sx={{ bgcolor: '#dbeafe', color: '#1d4ed8', fontWeight: 700, fontSize: '0.66rem' }} /></a> : <Chip label="Resultado" size="small" sx={{ bgcolor: '#f1f5f9', color: '#94a3b8', fontSize: '0.66rem' }} />}
+                        {ed.links?.resumo ? <a href={ed.links.resumo} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Resumo" size="small" clickable sx={{ bgcolor: '#dcfce7', color: '#166534', fontWeight: 700, fontSize: '0.66rem' }} /></a> : <Chip label="Resumo" size="small" sx={{ bgcolor: '#f1f5f9', color: '#94a3b8', fontSize: '0.66rem' }} />}
+                        {ed.links?.diarioOficial && <a href={ed.links.diarioOficial} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Diário Oficial" size="small" clickable sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: '0.66rem' }} /></a>}
                       </div>
-                    )}
-                    {/* 🔗 Links oficiais */}
-                    {(() => {
-                      const links = resolveEditalLinks(ed.nome, dadosReais.customEditalLinks);
-                      return (
-                        <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100">
-                          {links?.resultado ? (
-                            <a href={links.resultado} target="_blank" rel="noopener noreferrer" className="no-underline">
-                              <Chip 
-                                label="📄 Resultado Oficial" 
-                                size="small" 
-                                clickable
-                                sx={{ bgcolor: '#dbeafe', color: '#1d4ed8', fontWeight: 600, fontSize: '0.7rem', '&:hover': { bgcolor: '#bfdbfe' } }} 
-                              />
-                            </a>
-                          ) : (
-                            <Chip label="📄 Resultado" size="small" sx={{ bgcolor: '#f3f4f6', color: '#9ca3af', fontSize: '0.7rem' }} />
-                          )}
-                          {links?.resumo ? (
-                            <a href={links.resumo} target="_blank" rel="noopener noreferrer" className="no-underline">
-                              <Chip 
-                                label="📊 Resumo" 
-                                size="small" 
-                                clickable
-                                sx={{ bgcolor: '#d1fae5', color: '#065f46', fontWeight: 600, fontSize: '0.7rem', '&:hover': { bgcolor: '#a7f3d0' } }} 
-                              />
-                            </a>
-                          ) : (
-                            <Chip label="📊 Resumo" size="small" sx={{ bgcolor: '#f3f4f6', color: '#9ca3af', fontSize: '0.7rem' }} />
-                          )}
-                          {links?.diarioOficial && (
-                            <a href={links.diarioOficial} target="_blank" rel="noopener noreferrer" className="no-underline">
-                              <Chip 
-                                label="📰 Diário Oficial" 
-                                size="small" 
-                                clickable
-                                sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 600, fontSize: '0.7rem', '&:hover': { bgcolor: '#fde68a' } }} 
-                              />
-                            </a>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
       <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] gap-6 xl:gap-8">
         <div className="min-w-0">

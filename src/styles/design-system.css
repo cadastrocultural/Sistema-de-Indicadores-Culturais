@@ -347,3 +347,41 @@
 .ds-focus-ring:focus:not(:focus-visible) {
   outline: none;
 }
+
+/* ============================================
+   Painéis analíticos (referência: kits tipo Dashboard / SmartCharts)
+   Superfícies neutras, sombra em camadas, borda quase imperceptível
+   ============================================ */
+.ds-dash-page {
+  background: linear-gradient(165deg, #f1f5f9 0%, #f8fafc 42%, #eef2f7 100%);
+}
+
+.ds-dash-panel {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 14px 44px -14px rgba(15, 23, 42, 0.1);
+}
+
+.ds-dash-panel-soft {
+  background: rgba(248, 250, 252, 0.85);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  border-radius: 0.875rem;
+}
+
+.ds-dash-section-title {
+  font-size: clamp(1.25rem, 2.2vw, 1.6rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.ds-dash-kicker {
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #0b57d0;
+}

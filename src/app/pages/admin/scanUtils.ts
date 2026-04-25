@@ -178,6 +178,19 @@ export const scanIdadeInRow = (row: any, calcIdadeFn: (s: string) => number | nu
     const cl = k.replace(/[;:.,]/g, '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (cl.includes('faixa') && (cl.includes('valor') || cl.includes('escolhida'))) continue;
     if (cl.includes('comunidade') || cl.includes('tradicional') || cl.includes('pertence')) continue;
+    if (
+      cl.includes('identidade') ||
+      cl.includes('unidade') ||
+      cl.includes('quantidade') ||
+      cl.includes('qualidade') ||
+      cl.includes('validade') ||
+      cl.includes('cidade') ||
+      cl.includes('solidade') ||
+      cl.includes('faculdade') ||
+      cl.includes('prioridade')
+    ) {
+      continue;
+    }
     if (cl.includes('idade') || cl.includes('nascimento') || cl.includes('data de nascimento') ||
         cl.includes('faixa etaria') || cl.includes('faixa_etaria') || cl.includes('dt_nasc')) {
       const val = row[k];
@@ -202,9 +215,28 @@ export const scanIdadeInRow = (row: any, calcIdadeFn: (s: string) => number | nu
 
 export const scanOrientacaoInRow = (row: any): string => {
   const rowKeys = Object.keys(row);
-  const oriCol = rowKeys.find(k => {
+  const oriCol = rowKeys.find((k) => {
     const cl = k.replace(/[;:.,]/g, '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    return (cl.includes('orientacao') || cl.includes('sexualidade')) && !cl.includes('genero');
+    const c = cl.replace(/[\s_\-]/g, '');
+    if (cl.includes('genero') && !cl.includes('orientacao')) return false;
+    if (
+      cl.includes('projeto') ||
+      cl.includes('resumo') ||
+      cl.includes('descricao') ||
+      cl.includes('objetivo') ||
+      cl.includes('metodologia') ||
+      cl.includes('pedagog') ||
+      cl.includes('curricular') ||
+      cl.includes('proposta') ||
+      cl.includes('justificativa')
+    ) {
+      return false;
+    }
+    if (c.includes('orientacaosexual') || c.includes('orientacaosex')) return true;
+    if (c.includes('sexualidade')) return true;
+    if (c.includes('orientacao') && (c.includes('sexual') || c.includes('sexuais'))) return true;
+    if (c.includes('qual') && c.includes('orientacao') && c.includes('sexual')) return true;
+    return false;
   });
   if (oriCol && row[oriCol]) {
     const val = String(row[oriCol]).trim();

@@ -1,8 +1,5 @@
 import React from 'react';
 
-// Importa o logo circular colorido
-import logoCadastro from 'figma:asset/b517618c80e058d074df30a0fcacbe8286012d13.png';
-
 interface HeaderProps {
   currentPage: string;
   onPageChange: (page: string) => void;
@@ -20,14 +17,14 @@ export function Header({ currentPage, onPageChange, adminAuthed = false, onAdmin
   ];
 
   return (
-    <header className="sticky top-0 z-50 backdrop-blur-md bg-white/95 border-b border-gray-200 shadow-sm">
-      <div className="container mx-auto px-6 py-3 flex items-center justify-between">
+    <header className="sticky top-0 z-50 border-b border-slate-200/90 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)] backdrop-blur-xl">
+      <div className="container mx-auto flex items-center justify-between px-6 py-3">
         <div className="flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => onPageChange('home')}>
           {/* Logo circular grande */}
-          <img 
-            src={logoCadastro} 
-            alt="Cadastro Cultural" 
-            className="h-12 w-12 object-contain"
+          <img
+            src="/footer/logo-cadastro-cultural.png"
+            alt="Cadastro Cultural"
+            className="h-12 w-12 shrink-0 object-contain [image-rendering:auto]"
           />
           <div className="flex flex-col">
             <span className="font-black text-[1.1rem] text-[#1b1b1f] leading-tight tracking-tight">
@@ -41,10 +38,10 @@ export function Header({ currentPage, onPageChange, adminAuthed = false, onAdmin
             <button
               key={item.id}
               onClick={() => onPageChange(item.id)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
-                currentPage === item.id 
-                  ? 'bg-[#0b57d0] text-white shadow-sm' 
-                  : 'text-[#5f5f6a] hover:bg-gray-50'
+              className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition-all ${
+                currentPage === item.id
+                  ? 'bg-[#0b57d0] text-white shadow-md shadow-blue-900/15'
+                  : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
               {item.label}
@@ -55,10 +52,10 @@ export function Header({ currentPage, onPageChange, adminAuthed = false, onAdmin
               <button
                 type="button"
                 onClick={() => onPageChange('admin')}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition-all ${
                   currentPage === 'admin'
-                    ? 'bg-[#0b57d0] text-white shadow-sm'
-                    : 'text-[#5f5f6a] hover:bg-gray-50'
+                    ? 'bg-[#0b57d0] text-white shadow-md shadow-blue-900/15'
+                    : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
                 Admin
@@ -66,7 +63,7 @@ export function Header({ currentPage, onPageChange, adminAuthed = false, onAdmin
               <button
                 type="button"
                 onClick={() => onAdminLogout?.()}
-                className="px-4 py-1.5 rounded-full text-sm font-semibold text-[#b91c1c] border border-red-200 hover:bg-red-50 transition-all"
+                className="rounded-lg border border-red-200/90 px-3.5 py-2 text-sm font-semibold text-red-700 transition-all hover:bg-red-50"
               >
                 Sair
               </button>
@@ -75,10 +72,10 @@ export function Header({ currentPage, onPageChange, adminAuthed = false, onAdmin
             <button
               type="button"
               onClick={() => onPageChange('admin')}
-              className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${
+              className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition-all ${
                 currentPage === 'admin'
-                  ? 'bg-[#0b57d0] text-white shadow-sm'
-                  : 'bg-[#0b57d0] text-white hover:bg-[#0842a8] shadow-sm'
+                  ? 'bg-[#0b57d0] text-white shadow-md shadow-blue-900/15'
+                  : 'bg-[#0b57d0] text-white shadow-md shadow-blue-900/20 hover:bg-[#0842a8]'
               }`}
             >
               Entrar
