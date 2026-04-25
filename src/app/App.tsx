@@ -79,36 +79,36 @@ export default function App() {
       {/* RODAPÉ UNIFICADO EM UMA ÚNICA FAIXA */}
       <footer className="mt-auto border-t border-slate-200/80 bg-white py-6 shadow-[0_-1px_0_rgba(15,23,42,0.04)]">
         <div className="container mx-auto max-w-6xl px-6">
-          {/* Logos centralizados */}
-          <div className="flex flex-col items-center justify-center gap-6">
+          {/* Logos lado a lado */}
+          <div className="flex flex-wrap items-center justify-center gap-8">
             
             {/* Logo Prefeitura + Secretaria de Cultura */}
-            <div className="flex justify-center">
+            <div className="flex items-center">
               <img
                 src="/footer/footer-prefeitura-cultura.png"
                 alt="Prefeitura de Ilhabela — Secretaria de Cultura"
                 className="h-12 w-auto object-contain"
-                style={{ maxWidth: 480 }}
+                style={{ maxWidth: 400 }}
               />
             </div>
 
-            {/* Logos do sistema + governo federal centralizados */}
-            <div className="flex flex-col items-center gap-4">
-              <div className="flex items-center gap-2.5">
-                <img
-                  src="/footer/logo-cadastro-cultural.png"
-                  alt="Cadastro Cultural de Ilhabela"
-                  className="h-10 w-10 object-contain"
-                />
-                <div className="text-left">
-                  <p className="text-[0.76rem] font-black leading-tight text-[#0b57d0]">Cadastro Cultural</p>
-                  <p className="text-[0.65rem] font-bold uppercase tracking-wide text-[#5f5f6a]">Ilhabela</p>
-                </div>
+            {/* Logo Cadastro Cultural */}
+            <div className="flex items-center gap-2.5">
+              <img
+                src="/footer/logo-cadastro-cultural.png"
+                alt="Cadastro Cultural de Ilhabela"
+                className="h-10 w-10 object-contain"
+              />
+              <div className="text-left">
+                <p className="text-[0.76rem] font-black leading-tight text-[#0b57d0]">Cadastro Cultural</p>
+                <p className="text-[0.65rem] font-bold uppercase tracking-wide text-[#5f5f6a]">Ilhabela</p>
               </div>
-              <div className="flex items-center gap-5">
-                <img src={logoPNAB} alt="PNAB" className="h-9 object-contain" />
-                <img src={logoFederal} alt="Governo Federal" className="h-9 object-contain" />
-              </div>
+            </div>
+
+            {/* Logos governo federal */}
+            <div className="flex items-center gap-5">
+              <img src={logoPNAB} alt="PNAB" className="h-9 object-contain" />
+              <img src={logoFederal} alt="Governo Federal" className="h-9 object-contain" />
             </div>
 
           </div>
