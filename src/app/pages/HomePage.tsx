@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useId, useRef, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useId } from 'react';
 import { motion } from 'motion/react';
 import { 
   TrendingUp, Users, MapPin, Calendar, ArrowRight, 
@@ -32,7 +32,6 @@ import { canonicalBairroIlhabela, looksLikeEnderecoCompleto } from '../data/bair
 import { Timeline } from '../components/Timeline';
 import { AdminImportCharts } from '../components/admin/AdminImportCharts';
 import { HomeDiversityCharts, type DiversityChartsPayload } from '../components/HomeDiversityCharts';
-import { HERO_BACKGROUND_VIDEO_URLS } from '../data/hero-videos';
 import { findFieldValue } from '../utils/dashboardDiversityFields';
 
 // Helper: adiciona IDs únicos a arrays de dados para evitar warnings de keys duplicadas no Recharts
@@ -418,48 +417,6 @@ export function HomePage({ onNavigate }: HomePageProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const heroVideoRef = useRef<HTMLVideoElement | null>(null);
-
-  const heroPlaylistUrls = useMemo(
-    () => HERO_BACKGROUND_VIDEO_URLS.map((u) => String(u).trim()).filter(Boolean),
-    []
-  );
-
-  const [heroRespectReducedMotion, setHeroRespectReducedMotion] = useState(false);
-  useEffect(() => {
-    setHeroRespectReducedMotion(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false);
-  }, []);
-
-  const heroUrlsEffective = heroRespectReducedMotion ? [] : heroPlaylistUrls;
-  const [heroVideoIndex, setHeroVideoIndex] = useState(0);
-  const heroVideoSrc =
-    heroUrlsEffective.length > 0 ? heroUrlsEffective[heroVideoIndex % heroUrlsEffective.length] : null;
-  const heroPlaylistLoop = heroUrlsEffective.length > 1;
-
-  const [heroVideoFailed, setHeroVideoFailed] = useState(false);
-  const [heroVideoReady, setHeroVideoReady] = useState(false);
-  const showHeroVideo = Boolean(heroVideoSrc && !heroVideoFailed);
-
-  const handleHeroVideoEnded = useCallback(() => {
-    if (!heroPlaylistLoop) return;
-    setHeroVideoIndex((i) => (i + 1) % heroUrlsEffective.length);
-  }, [heroPlaylistLoop, heroUrlsEffective.length]);
-
-  useEffect(() => {
-    if (!showHeroVideo || !heroVideoRef.current) return;
-    const el = heroVideoRef.current;
-    el.muted = true;
-    el.defaultMuted = true;
-    el.volume = 0;
-    try {
-      el.setAttribute('defaultMuted', '');
-    } catch {
-      /* ignore */
-    }
-    el.setAttribute('muted', '');
-    const p = el.play();
-    if (p !== undefined) void p.catch(() => {});
-  }, [showHeroVideo, heroVideoSrc, heroVideoIndex]);
   
   useEffect(() => {
     setIsMounted(true);
@@ -1405,7 +1362,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
           { nome: 'Projetos / editais', qtd: editaisFinais.length },
         ].filter((x) => x.qtd > 0),
         tradVinculo: [
-          { nome: 'Com vínculo trad.', qtd: comTradRegistros },
+          { nome: 'Comunidade tradicional', qtd: comTradRegistros },
           { nome: 'Sem vínculo', qtd: Math.max(0, todosParaDiversidade.length - comTradRegistros) },
         ],
         negrosComparativoBase: [
@@ -1792,53 +1749,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
   return (
     <div className="ds-dash-page min-h-screen pb-20 font-sans text-[#1b1b1f]">
-      {/* Hero — painel executivo (dados dos KPIs permanecem abaixo, inalterados) */}
-      <section
-        className={`relative overflow-hidden border-b border-slate-800/40 ${
-          showHeroVideo ? 'min-h-0 pb-0 md:pb-0' : ''
-        }`}
-      >
-        {showHeroVideo && (
-          <motion.div
-            className="pointer-events-none absolute inset-0 z-0"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: heroVideoReady ? 1 : 0 }}
-            transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <video
-              key={`${heroVideoIndex}-${heroVideoSrc}`}
-              ref={heroVideoRef}
-              className="h-full min-h-[11rem] w-full scale-[1.02] object-cover sm:min-h-[13rem] md:min-h-[15rem]"
-              src={heroVideoSrc ?? undefined}
-              autoPlay
-              muted
-              loop={!heroPlaylistLoop}
-              playsInline
-              preload="auto"
-              disablePictureInPicture
-              onLoadedData={() => setHeroVideoReady(true)}
-              onCanPlay={() => setHeroVideoReady(true)}
-              onEnded={handleHeroVideoEnded}
-              onError={() => setHeroVideoFailed(true)}
-            />
-          </motion.div>
-        )}
-
-        {!showHeroVideo && (
-          <div
-            className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent),linear-gradient(165deg,#070b14_0%,#0f172a_45%,#0c1a33_100%)]"
-            aria-hidden
-          />
-        )}
-
+      {/* Hero — painel executivo */}
+      <section className="relative overflow-hidden border-b border-slate-800/40">
         <div
-          className={`absolute inset-0 z-[1] ${
-            showHeroVideo
-              ? 'bg-gradient-to-b from-slate-950/90 via-slate-950/84 to-slate-950/93'
-              : 'bg-slate-950/20'
-          }`}
+          className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent),linear-gradient(165deg,#070b14_0%,#0f172a_45%,#0c1a33_100%)]"
           aria-hidden
         />
+
+        <div className="absolute inset-0 z-[1] bg-slate-950/20" aria-hidden />
 
         <div
           className="pointer-events-none absolute inset-0 z-[2] opacity-[0.06]"
@@ -1937,7 +1855,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
               <p className="ds-dash-kicker text-[#0b57d0]">Painel público</p>
             </div>
             <h2 className="text-lg font-extrabold tracking-tight text-slate-900 md:text-xl">
-              Indicadores ao vivo e análise gráfica
+              Indicadores e análise gráfica
             </h2>
             <p className="mt-1 max-w-3xl text-xs font-medium leading-relaxed text-slate-500 sm:text-sm">
               Cadastro no mapa de totais = apenas mapeamento cultural (deduplicado). Editais seguem o breakdown do Admin.
