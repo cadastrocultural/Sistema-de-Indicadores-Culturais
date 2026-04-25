@@ -79,10 +79,11 @@ export default function App() {
       {/* RODAPÉ UNIFICADO EM UMA ÚNICA FAIXA */}
       <footer className="mt-auto border-t border-slate-200/80 bg-white py-6 shadow-[0_-1px_0_rgba(15,23,42,0.04)]">
         <div className="container mx-auto max-w-6xl px-6">
-          <div className="flex flex-col items-center justify-between gap-6 md:flex-row md:gap-8">
-
-            {/* Esquerda: logo oficial Prefeitura + Secretaria de Cultura */}
-            <div className="flex items-center justify-center md:justify-start">
+          {/* Logos centralizados */}
+          <div className="flex flex-col items-center justify-center gap-6">
+            
+            {/* Logo Prefeitura + Secretaria de Cultura */}
+            <div className="flex justify-center">
               <img
                 src="/footer/footer-prefeitura-cultura.png"
                 alt="Prefeitura de Ilhabela — Secretaria de Cultura"
@@ -91,8 +92,8 @@ export default function App() {
               />
             </div>
 
-            {/* Direita: logo do sistema + logos federais */}
-            <div className="flex flex-col items-center gap-4 md:flex-row md:items-center md:gap-6">
+            {/* Logos do sistema + governo federal centralizados */}
+            <div className="flex flex-col items-center gap-4">
               <div className="flex items-center gap-2.5">
                 <img
                   src="/footer/logo-cadastro-cultural.png"
@@ -104,12 +105,12 @@ export default function App() {
                   <p className="text-[0.65rem] font-bold uppercase tracking-wide text-[#5f5f6a]">Ilhabela</p>
                 </div>
               </div>
-              <div className="h-px w-16 bg-slate-200 md:h-8 md:w-px" />
               <div className="flex items-center gap-5">
                 <img src={logoPNAB} alt="PNAB" className="h-9 object-contain" />
                 <img src={logoFederal} alt="Governo Federal" className="h-9 object-contain" />
               </div>
             </div>
+
           </div>
 
           {/* Bottom Text */}
