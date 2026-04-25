@@ -1,7 +1,7 @@
 /**
  * MAPEAMENTO CULTURAL DE ILHABELA 2020
  * Dados REAIS dos agentes culturais cadastrados
- * APENAS dados importados via upload de planilhas
+ * Fallback estático quando localStorage estiver vazio (produção Vercel)
  */
 
 import { getBairroCoords } from './bairros-coords';

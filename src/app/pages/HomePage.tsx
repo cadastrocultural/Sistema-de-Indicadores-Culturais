@@ -28,6 +28,7 @@ import { resolveComunidadeTradicional } from './admin/comunidadeTradicionalUtils
 
 import { parseBRLValue } from '../data/editais-data';
 import { MAPEAMENTO_2020 } from '../data/mapeamento-data';
+import { DADOS_ESTATICOS } from '../data/dados-estaticos';
 import { canonicalBairroIlhabela, looksLikeEnderecoCompleto } from '../data/bairros-coords';
 import { Timeline } from '../components/Timeline';
 import { AdminImportCharts } from '../components/admin/AdminImportCharts';
@@ -548,9 +549,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
       }
     }
     
-    // Se não há dados importados, usa os dados estáticos como fallback
-    const agentesFinais = agentesImportados.length > 0 ? agentesImportados : [];
-    const editaisFinais = editaisImportados.length > 0 ? editaisImportados : [];
+    // Fallback para dados estáticos embutidos quando localStorage estiver vazio (ex: produção Vercel)
+    const agentesFinais = agentesImportados.length > 0 ? agentesImportados : DADOS_ESTATICOS.agentes;
+    const editaisFinais = editaisImportados.length > 0 ? editaisImportados : DADOS_ESTATICOS.projetos;
+    if (gruposImportados.length === 0) gruposImportados = DADOS_ESTATICOS.grupos;
+    if (espacosImportados.length === 0) espacosImportados = DADOS_ESTATICOS.espacos;
     
     const totalAgentes = agentesFinais.length;
     const totalGrupos = gruposImportados.length;
@@ -1459,10 +1462,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
   // 🆕 CALCULA AUTOMATICAMENTE DISTRIBUIÇÃO POR BAIRRO (para o gráfico "Distribuição Geográfica")
   const distribuicaoPorBairro = useMemo(() => {
     const loadedData = localStorage.getItem('editais_imported_data');
-    if (!loadedData) return [];
-    
+
     try {
-      const parsed = normalizeProjetosOnParsed(JSON.parse(loadedData)) as Record<string, any>;
+      const parsed = loadedData
+        ? (normalizeProjetosOnParsed(JSON.parse(loadedData)) as Record<string, any>)
+        : (DADOS_ESTATICOS as unknown as Record<string, any>);
       const todosCadastro = [
         ...(parsed.agentes || []),
         ...(parsed.grupos || []),
@@ -1530,13 +1534,15 @@ export function HomePage({ onNavigate }: HomePageProps) {
     const map = new Map<string, { count: number; displayName: string }>();
     const raw = localStorage.getItem('editais_imported_data');
     let projetos: any[] = [];
-    if (raw) {
-      try {
+    try {
+      if (raw) {
         const parsed = normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>;
         projetos = parsed.projetos || [];
-      } catch {
-        /* ignore */
+      } else {
+        projetos = DADOS_ESTATICOS.projetos;
       }
+    } catch {
+      projetos = DADOS_ESTATICOS.projetos;
     }
     for (const p of projetos) {
       const name = String(
@@ -1558,24 +1564,26 @@ export function HomePage({ onNavigate }: HomePageProps) {
       .slice(0, 5);
   }, [refreshKey]);
 
-  /** Só exibe série quando há contemplados com ano e valor derivados das planilhas importadas (sem dados de exemplo). */
+  /** Exibe evolução de investimento — usa dados estáticos quando localStorage estiver vazio. */
   const evolucaoInvestimentoCharts = useMemo(() => {
     const raw = localStorage.getItem('editais_imported_data');
-    if (!raw) return [];
     try {
-      const parsed = normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>;
+      const parsed = raw
+        ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
+        : (DADOS_ESTATICOS as unknown as Record<string, any>);
       const projetos = (parsed.projetos || []) as any[];
       if (projetos.length === 0) return [];
       const anoMap = new Map<number, number>();
       projetos.forEach((p: any) => {
         const st = (p.status || p.Status || '').toLowerCase();
-        const isContemp =
+        const isContempByStatus =
           st.includes('contemplado') ||
           st.includes('aprovado') ||
           st.includes('classificado') ||
           st.includes('selecionado');
-        if (!isContemp) return;
-        let ano = parseInt(String(p.ano || ''), 10);
+        const isContempByFlag = p.eh_contemplado === true || p.eh_contemplado === 'true' || p.eh_contemplado === 1;
+        if (!isContempByStatus && !isContempByFlag) return;
+        let ano = parseInt(String(p._anoOrigem || p.ano || ''), 10);
         if (!Number.isFinite(ano) || ano < 1990) {
           const m = String(p._editalOrigem || p.edital || p.Edital || p['Edital'] || '').match(/(\d{4})/);
           ano = m ? parseInt(m[1], 10) : 0;
@@ -1596,9 +1604,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
   const categoriasCharts = useMemo(() => {
     const raw = localStorage.getItem('editais_imported_data');
-    if (!raw) return [];
     try {
-      const parsed = normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>;
+      const parsed = raw
+        ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
+        : (DADOS_ESTATICOS as unknown as Record<string, any>);
       const projetos = (parsed.projetos || []) as any[];
       if (projetos.length === 0) return [];
       const catMap = new Map<string, { qtd: number; valor: number }>();
@@ -1934,6 +1943,26 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 chipLabel={`${resumoGlobal.trad} registros`}
                 value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{resumoGlobal.comunidadesOficiais}</p>}
                 subtitle="Comunidades da lista oficial municipal (Ilhabela, SP)"
+              />
+            </motion.div>
+
+            <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, duration: 0.4, ease: [0.22,1,0.36,1] }}>
+              <KpiMetricCard
+                borderColor="#be185d"
+                icon={<Users size={18} strokeWidth={2.5} />}
+                chipLabel={resumoGlobal.totalDiversidade > 0 ? `${resumoGlobal.percMulheres}%` : 'Diversidade'}
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{resumoGlobal.mulheres}</p>}
+                subtitle="Mulheres no campo cultural (agentes e proponentes)"
+              />
+            </motion.div>
+
+            <motion.div className="min-w-0 sm:col-span-2 xl:col-span-4" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45, duration: 0.4, ease: [0.22,1,0.36,1] }}>
+              <KpiMetricCard
+                borderColor="#7c3aed"
+                icon={<PieChartIcon size={18} strokeWidth={2.5} />}
+                chipLabel={resumoGlobal.faixaAnos ? resumoGlobal.faixaAnos : 'Diversidade'}
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{resumoGlobal.negros}</p>}
+                subtitle="Negros e pardos autodeclarados (agentes e proponentes)"
               />
             </motion.div>
           </div>
