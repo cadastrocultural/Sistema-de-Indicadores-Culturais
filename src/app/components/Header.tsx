@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface HeaderProps {
   currentPage: string;
   onPageChange: (page: string) => void;
@@ -20,7 +18,6 @@ export function Header({ currentPage, onPageChange, adminAuthed = false, onAdmin
     <header className="sticky top-0 z-50 border-b border-slate-200/90 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)] backdrop-blur-xl">
       <div className="container mx-auto flex items-center justify-between px-6 py-3">
         <div className="flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => onPageChange('home')}>
-          {/* Logo circular grande */}
           <img
             src="/footer/logo-cadastro-cultural.png"
             alt="Cadastro Cultural"
