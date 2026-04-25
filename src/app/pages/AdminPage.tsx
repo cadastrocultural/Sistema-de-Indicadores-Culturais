@@ -3253,7 +3253,6 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
   const adminPinEnvRaw = import.meta.env.VITE_ADMIN_PIN;
   const adminPinEnv = typeof adminPinEnvRaw === 'string' ? adminPinEnvRaw.trim() : '';
   const adminPinRequired = adminPinEnv.length > 0;
-  const allowDevOpen = import.meta.env.DEV && !adminPinRequired;
 
   if (!adminAuthed) {
     return (
@@ -3266,53 +3265,45 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {adminPinRequired
-                  ? 'Informe o PIN configurado em VITE_ADMIN_PIN no arquivo .env do projeto (veja também .env.example).'
-                  : allowDevOpen
-                    ? 'Ambiente de desenvolvimento: nenhum PIN definido. Use o botão abaixo ou crie um arquivo .env com VITE_ADMIN_PIN e reinicie o servidor.'
-                    : 'Em produção é obrigatório definir VITE_ADMIN_PIN no .env antes do build. Consulte .env.example na raiz do projeto.'}
+                  ? 'Informe o PIN configurado em VITE_ADMIN_PIN no arquivo .env do projeto.'
+                  : 'Nenhum PIN configurado. Clique em "Entrar" para acessar. Para proteger o painel, crie um arquivo .env com VITE_ADMIN_PIN=seu_pin e reinicie o servidor.'}
               </Typography>
-              <TextField
-                fullWidth
-                type="password"
-                label="PIN de acesso"
-                value={adminLoginPin}
-                onChange={(e) => setAdminLoginPin(e.target.value)}
-                sx={{ mb: 2 }}
-                autoComplete="current-password"
-                disabled={!adminPinRequired}
-              />
+              {adminPinRequired && (
+                <TextField
+                  fullWidth
+                  type="password"
+                  label="PIN de acesso"
+                  value={adminLoginPin}
+                  onChange={(e) => setAdminLoginPin(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && adminLoginPin.trim() === adminPinEnv) {
+                      setAdminAuthed(true);
+                      setAdminLoginPin('');
+                    }
+                  }}
+                  sx={{ mb: 2 }}
+                  autoComplete="current-password"
+                />
+              )}
               <Button
                 fullWidth
                 variant="contained"
-                disabled={!adminPinRequired}
                 sx={{ bgcolor: '#0b57d0', fontWeight: 700, py: 1.5, mb: 1 }}
                 onClick={() => {
-                  if (!adminPinRequired) {
-                    return;
-                  }
-                  if (adminLoginPin.trim() === adminPinEnv) {
-                    setAdminAuthed(true);
-                    setAdminLoginPin('');
+                  if (adminPinRequired) {
+                    if (adminLoginPin.trim() === adminPinEnv) {
+                      setAdminAuthed(true);
+                      setAdminLoginPin('');
+                    } else {
+                      alert('PIN incorreto.');
+                    }
                   } else {
-                    alert('PIN incorreto.');
+                    setAdminAuthed(true);
                   }
                 }}
               >
-                Entrar
+                {adminPinRequired ? 'Entrar' : 'Acessar painel'}
               </Button>
-              {allowDevOpen && (
-                <Button
-                  fullWidth
-                  variant="outlined"
-                  sx={{ fontWeight: 700, py: 1.25, mb: 1, borderColor: '#64748b', color: '#334155' }}
-                  onClick={() => {
-                    setAdminAuthed(true);
-                    setAdminLoginPin('');
-                  }}
-                >
-                  Entrar sem PIN (somente este ambiente local)
-                </Button>
-              )}
               <Button fullWidth variant="text" onClick={() => onNavigate('home')} sx={{ fontWeight: 600 }}>
                 ← Voltar ao site
               </Button>

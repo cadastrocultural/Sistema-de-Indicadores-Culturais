@@ -316,74 +316,69 @@ function DashboardSectionHeader({
 
 function KpiMetricCard({
   borderColor,
-  iconBg,
-  iconColor,
   icon,
-  chip,
-  main,
+  chipLabel,
+  value,
   subtitle,
 }: {
   borderColor: string;
-  iconBg: string;
-  iconColor: string;
   icon: React.ReactNode;
-  chip: React.ReactNode;
-  main: React.ReactNode;
+  chipLabel: string;
+  value: React.ReactNode;
   subtitle: string;
 }) {
   return (
-    <Card
-      sx={{
-        height: '100%',
+    <div
+      className="flex h-full flex-col"
+      style={{
         minWidth: 0,
+        borderRadius: '16px',
+        background: borderColor,
+        padding: '16px 18px 18px',
         position: 'relative',
         overflow: 'hidden',
-        borderRadius: '20px',
-        bgcolor: '#ffffff',
-        border: '1px solid rgba(15,23,42,0.07)',
-        boxShadow: '0 2px 6px rgba(15,23,42,0.04), 0 20px 48px -20px rgba(15,23,42,0.12)',
-        transition: 'all 0.28s cubic-bezier(0.22,1,0.36,1)',
-        '&:hover': {
-          boxShadow: `0 12px 40px -12px ${borderColor}44, 0 2px 8px rgba(15,23,42,0.06)`,
-          transform: 'translateY(-4px)',
-          borderColor: `${borderColor}30`,
-        },
-        /* Faixa lateral colorida */
-        '&::after': {
-          content: '""',
-          position: 'absolute',
-          top: '12%',
-          left: 0,
-          width: 4,
-          bottom: '12%',
-          borderRadius: '0 4px 4px 0',
-          background: `linear-gradient(180deg, ${borderColor} 0%, ${borderColor}bb 100%)`,
-          pointerEvents: 'none',
-        },
-        /* Tint de fundo sutil */
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          inset: 0,
-          background: `radial-gradient(ellipse 80% 60% at 10% 0%, ${borderColor}09 0%, transparent 70%)`,
-          pointerEvents: 'none',
-        },
+        boxShadow: `0 4px 20px ${borderColor}50, 0 1px 4px rgba(0,0,0,0.12)`,
+        transition: 'transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s',
+        cursor: 'default',
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 10px 32px ${borderColor}60, 0 2px 8px rgba(0,0,0,0.15)`;
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLDivElement).style.transform = '';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 4px 20px ${borderColor}50, 0 1px 4px rgba(0,0,0,0.12)`;
       }}
     >
-      <CardContent sx={{ p: { xs: '20px 20px 20px 24px', md: '22px 22px 22px 26px' } }}>
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl"
-            style={{ backgroundColor: iconBg, color: iconColor }}
-          >
-            {icon}
-          </div>
-          <div className="shrink-0">{chip}</div>
-        </div>
-        <div className="min-w-0">{main}</div>
-        <p className="mt-2 text-[0.82rem] font-semibold leading-snug text-slate-400 break-words tracking-[-0.01em]">{subtitle}</p>
-      </CardContent>
-    </Card>
+      {/* Shine diagonal */}
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none', borderRadius: 'inherit',
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 45%, transparent 70%)',
+      }} />
+      {/* Top row */}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span style={{ color: 'rgba(255,255,255,0.82)', display: 'flex' }}>{icon}</span>
+        <span style={{
+          fontSize: '0.58rem', fontWeight: 800, textTransform: 'uppercase',
+          letterSpacing: '0.1em', color: 'rgba(255,255,255,0.72)',
+          background: 'rgba(255,255,255,0.18)', borderRadius: '999px',
+          padding: '2px 9px', whiteSpace: 'nowrap',
+        }}>
+          {chipLabel}
+        </span>
+      </div>
+      {/* Value */}
+      <div className="flex-1" style={{ color: '#ffffff', minWidth: 0 }}>
+        {value}
+      </div>
+      {/* Subtitle */}
+      <p style={{
+        color: 'rgba(255,255,255,0.72)', fontSize: '0.72rem', fontWeight: 600,
+        margin: '8px 0 0', lineHeight: 1.35, letterSpacing: '-0.01em',
+      }}>
+        {subtitle}
+      </p>
+    </div>
   );
 }
 
@@ -1952,67 +1947,51 @@ export function HomePage({ onNavigate }: HomePageProps) {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 lg:gap-4">
             <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05, duration: 0.4, ease: [0.22,1,0.36,1] }}>
               <KpiMetricCard
-                borderColor="#0b57d0"
-                iconBg="#eff6ff"
-                iconColor="#0b57d0"
-                icon={<Users size={20} strokeWidth={2.25} />}
-                chip={<Chip label="Mapeamento" size="small" sx={{ fontWeight: 700, fontSize: '0.6rem', bgcolor: '#eff6ff', color: '#1d4ed8', border: 'none' }} />}
-                main={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none" style={{ color: '#0b57d0' }}>{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.agentes, resumoGlobal.totalAgentes)}</p>}
+                borderColor="#1a56db"
+                icon={<Users size={18} strokeWidth={2.5} />}
+                chipLabel="Mapeamento"
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.agentes, resumoGlobal.totalAgentes)}</p>}
                 subtitle="Agentes cadastrados no mapeamento cultural"
               />
             </motion.div>
 
             <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.4, ease: [0.22,1,0.36,1] }}>
               <KpiMetricCard
-                borderColor="#0d9488"
-                iconBg="#ecfeff"
-                iconColor="#0d9488"
-                icon={<Award size={20} strokeWidth={2.25} />}
-                chip={<Chip label="Mapeamento" size="small" sx={{ fontWeight: 700, fontSize: '0.6rem', bgcolor: '#ccfbf1', color: '#0f766e', border: 'none' }} />}
-                main={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none" style={{ color: '#0d9488' }}>{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.grupos, resumoGlobal.totalGrupos)}</p>}
-                subtitle="Grupos e coletivos cadastrados no mapeamento"
+                borderColor="#0f766e"
+                icon={<Award size={18} strokeWidth={2.5} />}
+                chipLabel="Mapeamento"
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.grupos, resumoGlobal.totalGrupos)}</p>}
+                subtitle="Grupos e coletivos cadastrados"
               />
             </motion.div>
 
             <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.4, ease: [0.22,1,0.36,1] }}>
               <KpiMetricCard
-                borderColor="#6366f1"
-                iconBg="#eef2ff"
-                iconColor="#6366f1"
-                icon={<Building2 size={20} strokeWidth={2.25} />}
-                chip={<Chip label="Mapeamento" size="small" sx={{ fontWeight: 700, fontSize: '0.6rem', bgcolor: '#e0e7ff', color: '#4338ca', border: 'none' }} />}
-                main={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none" style={{ color: '#6366f1' }}>{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.espacos, resumoGlobal.totalEspacos)}</p>}
-                subtitle="Espaços culturais cadastrados no mapeamento"
+                borderColor="#4338ca"
+                icon={<Building2 size={18} strokeWidth={2.5} />}
+                chipLabel="Mapeamento"
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.espacos, resumoGlobal.totalEspacos)}</p>}
+                subtitle="Espaços culturais cadastrados"
               />
             </motion.div>
 
             <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.4, ease: [0.22,1,0.36,1] }}>
               <KpiMetricCard
-                borderColor="#059669"
-                iconBg="#ecfdf5"
-                iconColor="#059669"
-                icon={<Trophy size={20} strokeWidth={2.25} />}
-                chip={
-                  <Chip
-                    label={resumoGlobal.totaisPublicos.totalEditais > 0 ? `${resumoGlobal.totaisPublicos.totalEditais} edital(is)` : 'Editais'}
-                    size="small"
-                    sx={{ fontWeight: 700, fontSize: '0.6rem', bgcolor: '#dcfce7', color: '#15803d', border: 'none' }}
-                  />
-                }
-                main={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none" style={{ color: '#059669' }}>{resumoGlobal.totaisPublicos.totalContemplados}</p>}
+                borderColor="#15803d"
+                icon={<Trophy size={18} strokeWidth={2.5} />}
+                chipLabel={resumoGlobal.totaisPublicos.totalEditais > 0 ? `${resumoGlobal.totaisPublicos.totalEditais} edital(is)` : 'Editais'}
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{resumoGlobal.totaisPublicos.totalContemplados}</p>}
                 subtitle="Projetos contemplados nos editais"
               />
             </motion.div>
 
             <motion.div className="min-w-0 sm:col-span-2 xl:col-span-4" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.4, ease: [0.22,1,0.36,1] }}>
               <KpiMetricCard
-                borderColor="#e11d48"
-                iconBg="#fff1f2"
-                iconColor="#e11d48"
-                icon={<BarChart3 size={20} strokeWidth={2.25} />}
-                chip={<Chip label="Investimento" size="small" sx={{ fontWeight: 700, fontSize: '0.6rem', bgcolor: '#ffe4e6', color: '#be123c', border: 'none' }} />}
-                main={
-                  <p className="m-0 font-black tabular-nums leading-tight tracking-tight break-words text-[1.4rem] min-[400px]:text-2xl sm:text-3xl lg:text-[1.95rem]" style={{ color: '#e11d48' }}>
+                borderColor="#be123c"
+                icon={<BarChart3 size={18} strokeWidth={2.5} />}
+                chipLabel="Investimento"
+                value={
+                  <p className="m-0 font-black tabular-nums leading-tight tracking-tight break-words text-white text-[1.4rem] min-[400px]:text-2xl sm:text-3xl lg:text-[1.95rem]">
                     {formatBRL(resumoGlobal.totaisPublicos.totalValorInvestido)}
                   </p>
                 }
@@ -2022,40 +2001,21 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
             <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, duration: 0.4, ease: [0.22,1,0.36,1] }}>
               <KpiMetricCard
-                borderColor="#7c3aed"
-                iconBg="#f5f3ff"
-                iconColor="#7c3aed"
-                icon={<FileText size={20} strokeWidth={2.25} />}
-                chip={<Chip label="Chamadas" size="small" sx={{ fontWeight: 700, fontSize: '0.6rem', bgcolor: '#ede9fe', color: '#6d28d9', border: 'none' }} />}
-                main={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none" style={{ color: '#7c3aed' }}>{resumoGlobal.totaisPublicos.totalEditais}</p>}
-                subtitle="Editais distintos nos projetos (Transparência)"
+                borderColor="#6d28d9"
+                icon={<FileText size={18} strokeWidth={2.5} />}
+                chipLabel="Chamadas"
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{resumoGlobal.totaisPublicos.totalEditais}</p>}
+                subtitle="Editais distintos nos projetos"
               />
             </motion.div>
 
             <motion.div className="min-w-0 sm:col-span-2 xl:col-span-4" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35, duration: 0.4, ease: [0.22,1,0.36,1] }}>
               <KpiMetricCard
-                borderColor="#d97706"
-                iconBg="#fffbeb"
-                iconColor="#d97706"
-                icon={<MapPin size={20} strokeWidth={2.25} />}
-                chip={
-                  <Chip
-                    label={`${resumoGlobal.trad} registros`}
-                    size="small"
-                    sx={{
-                      fontWeight: 700,
-                      fontSize: '0.6rem',
-                      bgcolor: '#fef3c7',
-                      color: '#b45309',
-                      border: 'none',
-                      maxWidth: 150,
-                      height: 'auto',
-                      '& .MuiChip-label': { whiteSpace: 'normal', lineHeight: 1.2, textAlign: 'right', py: 0.35 },
-                    }}
-                  />
-                }
-                main={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none" style={{ color: '#d97706' }}>{resumoGlobal.comunidadesOficiais}</p>}
-                subtitle="Comunidades da lista oficial municipal (Ilhabela, SP) usada no cadastro"
+                borderColor="#b45309"
+                icon={<MapPin size={18} strokeWidth={2.5} />}
+                chipLabel={`${resumoGlobal.trad} registros`}
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{resumoGlobal.comunidadesOficiais}</p>}
+                subtitle="Comunidades da lista oficial municipal (Ilhabela, SP)"
               />
             </motion.div>
           </div>
