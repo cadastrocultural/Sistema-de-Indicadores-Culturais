@@ -1456,7 +1456,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
       diversityCharts,
       // 🆕 Breakdown por edital (demanda vs oferta) — espelho dos dados salvos no Admin
       breakdownEditais,
-      customEditalLinks
+      customEditalLinks,
+      // 🆕 Itens para o mapa (com lat/lng)
+      todosItens: [
+        ...agentesFinais.map(a => ({ ...a, tipo: 'agente' as const })),
+        ...gruposImportados.map(g => ({ ...g, tipo: 'grupo' as const })),
+        ...espacosImportados.map(e => ({ ...e, tipo: 'espaco' as const })),
+        ...editaisFinais.map(p => ({ ...p, tipo: 'edital' as const }))
+      ]
     };
   }, [refreshKey]);
 
