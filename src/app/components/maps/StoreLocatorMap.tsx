@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
-import { MapPin, Users, Building, Groups, Search, Filter, X } from '@mui/icons-material'
+import { LocationOn, Person, Business, Group, Search, Filter, Close } from '@mui/icons-material'
+import { SvgIcon } from '@mui/material'
 
 interface CultureItem {
   id: string
@@ -213,7 +214,7 @@ export default function StoreLocatorMap({
                   onClick={clearFilters}
                   className="w-full flex items-center justify-center gap-1 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 >
-                  <X sx={{ fontSize: 16 }} />
+                  <Close sx={{ fontSize: 16 }} />
                   Limpar filtros
                 </button>
               )}
@@ -235,7 +236,7 @@ export default function StoreLocatorMap({
         <div className="flex-1 overflow-y-auto">
           {filteredItems.length === 0 ? (
             <div className="p-6 text-center text-slate-500">
-              <MapPin sx={{ fontSize: 40, opacity: 0.3, mb: 2 }} />
+              <LocationOn sx={{ fontSize: 40, opacity: 0.3, mb: 2 }} />
               <p className="text-sm">Nenhum resultado encontrado</p>
             </div>
           ) : (
@@ -393,7 +394,7 @@ export default function StoreLocatorMap({
               onClick={() => setSelectedItem(null)}
               className="absolute top-2 right-2 p-1 rounded-full hover:bg-slate-100"
             >
-              <X sx={{ fontSize: 16 }} />
+              <Close sx={{ fontSize: 16 }} />
             </button>
             <div className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: TIPO_COLORS[selectedItem.tipo] }}>
               {TIPO_EMOJI[selectedItem.tipo]} {selectedItem.tipo}
