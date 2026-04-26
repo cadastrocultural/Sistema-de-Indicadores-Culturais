@@ -384,6 +384,46 @@ export type DemandaOfertaEditalRow = {
   valorInvestido: number;
 };
 
+function applyOfficialAldirBlanc2020Fallback(row: DemandaOfertaEditalRow): DemandaOfertaEditalRow {
+  if (row.ano !== 2020) return row;
+  const norm = `${row.nome} ${row.nomeBase} ${row.chave}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (norm.includes('fomento') || norm.includes('projetos culturais') || norm.includes('221/2020')) {
+    return {
+      ...row,
+      contemplados: row.contemplados > 0 ? row.contemplados : 10,
+      valorInvestido: row.valorInvestido > 0 ? row.valorInvestido : 336_000,
+    };
+  }
+
+  if (norm.includes('agentes culturais') || norm.includes('premiacao de agentes') || norm.includes('198/2020')) {
+    return {
+      ...row,
+      contemplados: row.contemplados > 0 ? row.contemplados : 150,
+      valorInvestido: row.valorInvestido > 0 ? row.valorInvestido : 980_000,
+    };
+  }
+
+  if (norm.includes('grupos') || norm.includes('coletivos') || norm.includes('201/2020')) {
+    return {
+      ...row,
+      contemplados: row.contemplados > 0 ? row.contemplados : 10,
+    };
+  }
+
+  if (norm.includes('espacos') || norm.includes('espaços') || norm.includes('220/2020')) {
+    return {
+      ...row,
+      contemplados: row.contemplados > 0 ? row.contemplados : 6,
+    };
+  }
+
+  return row;
+}
+
 /**
  * Mesma lógica do resumo por edital+ano do Admin (planilha + `editalResumoOverrides`).
  */
@@ -401,7 +441,7 @@ export function computeDemandaOfertaPorEdital(
   });
 
   const porEditalRaw = Array.from(editaisMap.entries()).map(([chave, projs]) => {
-    const contProjs = projs.filter(isProjetoContemplado);
+    const contProjs = projs.filter((p) => isProjetoContemplado(p) || getProjetoValorNormalizado(p) > 0);
     const [nomeBase, anoStr] = chave.split('||');
     const ano = Number(anoStr || 0);
     const nome = ano > 0 ? `${nomeBase} (${ano})` : nomeBase;
@@ -440,5 +480,5 @@ export function computeDemandaOfertaPorEdital(
     };
   });
 
-  return merged.sort((a, b) => (b.ano || 0) - (a.ano || 0));
+  return merged.map(applyOfficialAldirBlanc2020Fallback).sort((a, b) => (b.ano || 0) - (a.ano || 0));
 }

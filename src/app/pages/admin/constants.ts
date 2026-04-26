@@ -55,10 +55,34 @@ export const ORIENTACAO_OPTIONS = [
 // 🔗 Links oficiais dos editais (resultado e resumo para transparência)
 export const LINKS_EDITAIS: Record<string, { resultado?: string; resumo?: string; diarioOficial?: string; label?: string }> = {
   'Edital de Fomento — Chamada 221/2020': {
-    resultado: 'https://www.ilhabela.sp.gov.br/cultura/edital-fomento-221-2020-resultado',
-    resumo: 'https://www.ilhabela.sp.gov.br/cultura/edital-fomento-221-2020-resumo',
+    resultado: 'https://www.ilhabela.sp.gov.br/arquivos/resultado_%E2%80%93_projetos_culturais_(fomento)_13082050.pdf',
+    resumo: 'https://www.ilhabela.sp.gov.br/cadastro-cultural-de-ilhabela',
     diarioOficial: 'https://www.ilhabela.sp.gov.br/diario-oficial',
     label: 'Chamada Pública 221/2020',
+  },
+  'Edital de Fomento (2020)': {
+    resultado: 'https://www.ilhabela.sp.gov.br/arquivos/resultado_%E2%80%93_projetos_culturais_(fomento)_13082050.pdf',
+    resumo: 'https://www.ilhabela.sp.gov.br/cadastro-cultural-de-ilhabela',
+    diarioOficial: 'https://www.ilhabela.sp.gov.br/diario-oficial',
+    label: 'Resultado oficial — Projetos Culturais (Fomento)',
+  },
+  'Edital de Premiação de Agentes Culturais (2020)': {
+    resultado: 'https://www.ilhabela.sp.gov.br/arquivos/resultado_%E2%80%93_agentes_13081549.pdf',
+    resumo: 'https://www.ilhabela.sp.gov.br/cadastro-cultural-de-ilhabela',
+    diarioOficial: 'https://www.ilhabela.sp.gov.br/diario-oficial',
+    label: 'Resultado oficial — Agentes Culturais',
+  },
+  'Edital de Grupos e Coletivos (2020)': {
+    resultado: 'https://www.ilhabela.sp.gov.br/arquivos/resultado_%E2%80%93_grupos_e_coletivos_13081835.pdf',
+    resumo: 'https://www.ilhabela.sp.gov.br/cadastro-cultural-de-ilhabela',
+    diarioOficial: 'https://www.ilhabela.sp.gov.br/diario-oficial',
+    label: 'Resultado oficial — Grupos e Coletivos',
+  },
+  'Edital de Espaços Culturais (2020)': {
+    resultado: 'https://www.ilhabela.sp.gov.br/arquivos/resultado_%E2%80%93_espacos_13081731.pdf',
+    resumo: 'https://www.ilhabela.sp.gov.br/cadastro-cultural-de-ilhabela',
+    diarioOficial: 'https://www.ilhabela.sp.gov.br/diario-oficial',
+    label: 'Resultado oficial — Espaços Culturais',
   },
   'PNAB 2024': {
     resultado: 'https://www.ilhabela.sp.gov.br/cultura/pnab-2024-resultado',

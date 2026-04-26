@@ -9,7 +9,7 @@ import {
 import { Button, Card, CardContent, Chip, Tooltip, Box, Stack, Typography, Paper } from '@mui/material';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
-  ResponsiveContainer, Line, Legend, Area, ComposedChart, PieChart, Pie, Cell,
+  ResponsiveContainer, Line, Legend, Area, ComposedChart, PieChart, Pie, Cell, LabelList,
 } from 'recharts';
 
 import { formatBRL, COMUNIDADES_TRADICIONAIS } from '../data/pnab-data';
@@ -17,6 +17,9 @@ import { useSuppressRechartsWarning } from '../hooks/useSuppressRechartsWarning'
 import { findEditalLinks as resolveEditalLinks } from './admin/editalUtils';
 import {
   computeDemandaOfertaPorEdital,
+  getEditalNomeExibicaoProjeto,
+  getProjetoValorNormalizado,
+  isProjetoContemplado,
   normalizeProjetosOnParsed,
   normalizeFullPersonNameForRanking,
   pickRicherCadastroPayload,
@@ -30,11 +33,12 @@ import { resolveComunidadeTradicional } from './admin/comunidadeTradicionalUtils
 import { parseBRLValue } from '../data/editais-data';
 import { MAPEAMENTO_2020 } from '../data/mapeamento-data';
 import { DADOS_ESTATICOS } from '../data/dados-estaticos';
-import { canonicalBairroIlhabela, looksLikeEnderecoCompleto } from '../data/bairros-coords';
+import { canonicalBairroIlhabela, getBairroCoords, looksLikeEnderecoCompleto } from '../data/bairros-coords';
 import { Timeline } from '../components/Timeline';
 import { AdminImportCharts } from '../components/admin/AdminImportCharts';
 import { HomeDiversityCharts, type DiversityChartsPayload } from '../components/HomeDiversityCharts';
 import { findFieldValue } from '../utils/dashboardDiversityFields';
+import { HERO_BACKGROUND_VIDEO_URLS } from '../data/hero-videos';
 
 // Helper: adiciona IDs únicos a arrays de dados para evitar warnings de keys duplicadas no Recharts
 const addUniqueIds = <T extends Record<string, any>>(arr: T[], prefix = 'item'): T[] => {
@@ -65,6 +69,27 @@ const chartCardSx = {
   bgcolor: '#ffffff',
 } as const;
 
+const diversityStatCardSx = (gradient: string) => ({
+  borderRadius: '20px',
+  boxShadow: '0 10px 30px -14px rgba(15,23,42,0.28), inset 0 1px 0 rgba(255,255,255,0.24)',
+  height: '100%',
+  background: gradient,
+  overflow: 'hidden',
+  position: 'relative',
+  transition: 'transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s',
+  '&:before': {
+    content: '""',
+    position: 'absolute',
+    inset: 0,
+    background: 'linear-gradient(135deg, rgba(255,255,255,0.18), transparent 52%)',
+    pointerEvents: 'none',
+  },
+  '&:hover': {
+    transform: 'translateY(-2px)',
+    boxShadow: '0 18px 44px -18px rgba(15,23,42,0.38), inset 0 1px 0 rgba(255,255,255,0.28)',
+  },
+} as const);
+
 /** Paleta vibrante (referência: dashboards analíticos modernos) */
 const CHART_VIVID = ['#7c3aed', '#2563eb', '#06b6d4', '#db2777', '#ea580c', '#16a34a', '#8b5cf6', '#0d9488'] as const;
 
@@ -77,6 +102,14 @@ const chartTooltipContentStyle: React.CSSProperties = {
   padding: '10px 14px',
   background: 'rgba(255,255,255,0.98)',
 };
+
+const formatCompactBRL = (value: unknown) =>
+  new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(Number(value) || 0);
 
 /** Altura dos gráficos no painel inicial (acima da dobra) */
 const LEAD_CHART_HEIGHT = 200;
@@ -301,15 +334,15 @@ function DashboardSectionHeader({
   description: string;
 }) {
   return (
-    <div className="mb-6 flex max-w-3xl gap-4 md:mb-8 md:gap-5">
+    <div className="mb-6 flex max-w-4xl gap-4 rounded-3xl border border-white/70 bg-white/60 p-4 shadow-[0_12px_40px_-24px_rgba(15,23,42,0.28)] backdrop-blur-sm md:mb-8 md:gap-5 md:p-5">
       <div
-        className="hidden w-1 shrink-0 rounded-full bg-gradient-to-b from-[#0b57d0] via-sky-500/80 to-slate-300/50 sm:block sm:min-h-[4.5rem]"
+        className="hidden w-1 shrink-0 rounded-full bg-gradient-to-b from-[#0b57d0] via-sky-500/80 to-slate-300/50 sm:block sm:min-h-[4.75rem]"
         aria-hidden
       />
       <div className="min-w-0">
-        <p className="ds-dash-kicker mb-2">{kicker}</p>
+        <p className="ds-dash-kicker mb-2 inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-[#0b57d0]">{kicker}</p>
         <h2 className="ds-dash-section-title mb-2">{title}</h2>
-        <p className="text-sm font-medium leading-relaxed text-slate-600 md:text-base">{description}</p>
+        <p className="text-sm font-medium leading-relaxed text-slate-600 md:text-[0.95rem]">{description}</p>
       </div>
     </div>
   );
@@ -330,25 +363,25 @@ function KpiMetricCard({
 }) {
   return (
     <div
-      className="flex h-full flex-col"
+      className="flex h-full min-h-[150px] flex-col"
       style={{
         minWidth: 0,
-        borderRadius: '16px',
-        background: borderColor,
+        borderRadius: '20px',
+        background: `linear-gradient(145deg, ${borderColor} 0%, ${borderColor} 54%, rgba(15,23,42,0.24) 100%)`,
         padding: '16px 18px 18px',
         position: 'relative',
         overflow: 'hidden',
-        boxShadow: `0 4px 20px ${borderColor}50, 0 1px 4px rgba(0,0,0,0.12)`,
+        boxShadow: `0 10px 28px -14px ${borderColor}, 0 1px 4px rgba(0,0,0,0.12)`,
         transition: 'transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s',
         cursor: 'default',
       }}
       onMouseEnter={(e) => {
         (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)';
-        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 10px 32px ${borderColor}60, 0 2px 8px rgba(0,0,0,0.15)`;
+        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 18px 40px -18px ${borderColor}, 0 2px 8px rgba(0,0,0,0.15)`;
       }}
       onMouseLeave={(e) => {
         (e.currentTarget as HTMLDivElement).style.transform = '';
-        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 4px 20px ${borderColor}50, 0 1px 4px rgba(0,0,0,0.12)`;
+        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 10px 28px -14px ${borderColor}, 0 1px 4px rgba(0,0,0,0.12)`;
       }}
     >
       {/* Shine diagonal */}
@@ -418,6 +451,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
   
   const [isMounted, setIsMounted] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [heroVideoIndex, setHeroVideoIndex] = useState(0);
 
   
   useEffect(() => {
@@ -451,6 +485,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
       clearInterval(intervalCheck);
     };
   }, []);
+
+  useEffect(() => {
+    if (HERO_BACKGROUND_VIDEO_URLS.length > 0 && heroVideoIndex >= HERO_BACKGROUND_VIDEO_URLS.length) {
+      setHeroVideoIndex(0);
+    }
+  }, [heroVideoIndex]);
 
   // Mesma fonte do Dashboard/Admin: servidor primeiro, depois cache no localStorage
   useEffect(() => {
@@ -575,11 +615,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
     
     /** Mesma lógica do painel Admin: edital+ano, overrides e exclusões da vitrine "Demanda vs Oferta". */
     const porEditalAll = computeDemandaOfertaPorEdital(editaisFinais, editalResumoOverrides as any);
-    const breakdownEditais: { chave: string; nome: string; inscritos: number; contemplados: number; valor: number }[] = porEditalAll
+    const breakdownEditais: { chave: string; nome: string; ano: string; inscritos: number; contemplados: number; valor: number }[] = porEditalAll
       .filter(r => !demandaOfertaExcluidosHome.includes(r.chave))
       .map(r => ({
         chave: r.chave,
         nome: r.nome,
+        ano: String(r.ano || ''),
         inscritos: r.inscritos,
         contemplados: r.contemplados,
         valor: r.valorInvestido,
@@ -645,6 +686,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
           (kn.includes('estado') && kn.includes('civil')) ||
           (kn.includes('situacao') && kn.includes('conjugal')) ||
           (kn.includes('situa') && kn.includes('conjugal')) ||
+          (kn.includes('condicao') && kn.includes('civil')) ||
+          (kn.includes('status') && kn.includes('civil')) ||
+          (kn.includes('relacionamento') && !kn.includes('projeto')) ||
           kn.includes('estadocivilproponente') ||
           kn.includes('estadocivildoproponente') ||
           kn.includes('estadocivildoagente');
@@ -665,12 +709,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
         .replace(/\s+/g, ' ')
         .trim();
       if (!v || v === '-' || v === 'n/a' || looksLikePersonName(v)) return '';
-      if (v.includes('solteir')) return 'Solteiro(a)';
+      if (v.includes('solteir') || v === 'single') return 'Solteiro(a)';
       if (v.includes('casad')) return 'Casado(a)';
       if (v.includes('divorci') || v.includes('desquit')) return 'Divorciado(a)';
       if (v.includes('viuv')) return 'Viúvo(a)';
       if (v.includes('separad')) return 'Separado(a)';
-      if (v.includes('uniao estavel')) return 'União estável';
+      if (v.includes('uniao estavel') || v.includes('união estavel') || v.includes('companheir')) return 'União estável';
       if (v.includes('nao informado') || v.includes('não informado') || v.includes('prefiro nao') || v.includes('prefiro não')) return 'Não informado';
       return '';
     };
@@ -696,10 +740,19 @@ export function HomePage({ onNavigate }: HomePageProps) {
       ) {
         return '';
       }
-      if (v.includes('ate 1 salario') || v.includes('até 1 salario') || v.includes('ate um salario')) return 'Até 1 salário mínimo';
-      if (v.includes('1 a 3 salario') || v.includes('de 1 a 3 salario')) return 'De 1 a 3 salários mínimos';
-      if (v.includes('3 a 5 salario') || v.includes('de 3 a 5 salario')) return 'De 3 a 5 salários mínimos';
-      if (v.includes('acima de 5 salario') || v.includes('mais de 5 salario')) return 'Acima de 5 salários mínimos';
+      if (v.includes('sem renda') || v.includes('nao possui renda') || v.includes('não possui renda')) return 'Sem renda declarada';
+      if (
+        v.includes('ate 1 salario') ||
+        v.includes('até 1 salario') ||
+        v.includes('ate um salario') ||
+        v.includes('menos de 1 salario') ||
+        v.includes('meio salario') ||
+        v.includes('1 sm') ||
+        v.includes('1 s.m')
+      ) return 'Até 1 salário mínimo';
+      if (v.includes('1 a 3 salario') || v.includes('de 1 a 3 salario') || v.includes('1 e 3 salario') || v.includes('1 a 2 salario')) return 'De 1 a 3 salários mínimos';
+      if (v.includes('3 a 5 salario') || v.includes('de 3 a 5 salario') || v.includes('3 e 5 salario')) return 'De 3 a 5 salários mínimos';
+      if (v.includes('acima de 5 salario') || v.includes('mais de 5 salario') || v.includes('superior a 5 salario')) return 'Acima de 5 salários mínimos';
 
       const hasCurrency = v.includes('r$') || /[\d.]+,\d{2}/.test(v) || /^\d+([.,]\d+)?$/.test(v);
       if (!hasCurrency) return '';
@@ -731,6 +784,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
           kn.includes('renda') ||
           kn.includes('salario') ||
           kn.includes('salário') ||
+          kn.includes('ganho') ||
+          kn.includes('ganhos') ||
+          kn.includes('faixaeconomica') ||
+          kn.includes('vulnerabilidade') ||
           kn.includes('remuneracao') ||
           kn.includes('remuneração')
         ) {
@@ -745,23 +802,79 @@ export function HomePage({ onNavigate }: HomePageProps) {
       if (!obj || typeof obj !== 'object') return '';
       for (const [k, v] of Object.entries(obj)) {
         const kn = normalizeLooseKey(String(k || ''));
+        const compact = kn.replace(/[^a-z0-9]/g, '');
         if (
           kn.includes('experiencia') ||
           kn.includes('experiência') ||
           (kn.includes('tempo') && kn.includes('atuacao')) ||
+          (kn.includes('tempo') && kn.includes('cultura')) ||
           kn.includes('anosdeatuacao') ||
-          kn.includes('carreira')
+          compact.includes('anosdeatuacao') ||
+          compact.includes('tempodeatuacao') ||
+          compact.includes('desdequandoatua') ||
+          compact.includes('inicioatividade') ||
+          compact.includes('anoinicio') ||
+          compact.includes('anodeinicio') ||
+          compact.includes('anofundacao') ||
+          kn.includes('carreira') ||
+          kn.includes('trajetoria') ||
+          kn.includes('trajetória')
         ) {
           const raw = String(v || '').trim();
-          if (raw && raw.length <= 48) return raw;
+          if (raw && raw.length <= 80) return raw;
         }
       }
       return '';
     };
+
+    const normalizarExperienciaCultural = (raw: string): string => {
+      const txt = String(raw || '').replace(/\s+/g, ' ').trim();
+      if (!txt || txt.length > 80) return '';
+      const n = normalizeLooseKey(txt);
+      if (!n || n === 'nao informado' || n === 'nao se aplica' || n === '-') return '';
+
+      const yearMatch = n.match(/\b(19[5-9]\d|20[0-2]\d)\b/);
+      if (yearMatch) {
+        const anos = new Date().getFullYear() - Number(yearMatch[1]);
+        if (anos >= 0 && anos <= 80) {
+          if (anos <= 2) return 'Até 2 anos';
+          if (anos <= 5) return '3 a 5 anos';
+          if (anos <= 10) return '6 a 10 anos';
+          if (anos <= 20) return '11 a 20 anos';
+          return 'Mais de 20 anos';
+        }
+      }
+
+      const numberMatch = n.match(/\b(\d{1,2})\s*(anos?|ano|a)\b/) || n.match(/\b(\d{1,2})\b/);
+      if (numberMatch) {
+        const anos = Number(numberMatch[1]);
+        if (Number.isFinite(anos) && anos >= 0 && anos <= 80) {
+          if (anos <= 2) return 'Até 2 anos';
+          if (anos <= 5) return '3 a 5 anos';
+          if (anos <= 10) return '6 a 10 anos';
+          if (anos <= 20) return '11 a 20 anos';
+          return 'Mais de 20 anos';
+        }
+      }
+
+      if (n.includes('iniciante') || n.includes('inicio') || n.includes('menos de 1') || n.includes('ate 2') || n.includes('até 2') || n.includes('0 a 2')) return 'Até 2 anos';
+      if (n.includes('mais de 20') || n.includes('acima de 20')) return 'Mais de 20 anos';
+      if (n.includes('mais de 10') || n.includes('acima de 10')) return '11 a 20 anos';
+      if (n.includes('5 a 10') || n.includes('6 a 10') || n.includes('ate 10') || n.includes('até 10')) return '6 a 10 anos';
+      if (n.includes('3 a 5') || n.includes('2 a 5') || n.includes('ate 5') || n.includes('até 5')) return '3 a 5 anos';
+
+      return txt.length > 32 ? `${txt.slice(0, 29)}…` : txt;
+    };
     
     // 🎯 Indicadores de diversidade com a MESMA base da página inicial:
     // apenas cadastros culturais (agentes + grupos + espaços), sem somar linhas de projetos/editais.
-    const todosParaDiversidade = [...agentesFinais, ...gruposImportados, ...espacosImportados];
+    const mapRowsParaDiversidade = Array.isArray(baseMapeamento) ? baseMapeamento : [];
+    const todosParaDiversidade = [
+      ...mapRowsParaDiversidade,
+      ...agentesFinais,
+      ...gruposImportados,
+      ...espacosImportados,
+    ];
     const baseParaPercentual = todosParaDiversidade.length || 1;
     
     /** Mesma regra do Admin: só conta com nome oficial em COMUNIDADES_TRADICIONAIS (evita "Sim" genérico ou a palavra "comunidade" em títulos). */
@@ -865,8 +978,29 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
     /** Captura identidade de gênero mesmo quando a planilha usa rótulos/valores fora do padrão. */
     const getIdentidadeGeneroValue = (row: any): string => {
-      const direto = findFieldValue(row, 'identidade_genero', 'Identidade de gênero', 'Identidade de genero').trim();
+      const direto = findFieldValue(
+        row,
+        'identidade_genero',
+        'Identidade de gênero',
+        'Identidade de genero',
+        'Identidade Genero',
+        'identidade de genero',
+        'genero_identidade',
+        'gênero identidade',
+        'autoidentificacao_genero',
+        'autoidentificação de gênero'
+      ).trim();
       if (direto) return direto;
+      for (const [k, v] of Object.entries(row || {})) {
+        const kn = normalizeLooseKey(String(k || '')).replace(/[^a-z0-9]/g, '');
+        const looksLikeIdentityKey =
+          (kn.includes('identidade') && kn.includes('genero')) ||
+          (kn.includes('autoidentificacao') && kn.includes('genero')) ||
+          kn.includes('generoidentidade');
+        if (!looksLikeIdentityKey) continue;
+        const raw = String(v || '').trim();
+        if (raw && raw.length <= 80) return raw;
+      }
       const candidates = Object.values(row || {})
         .map((v) => String(v || '').trim())
         .filter((v) => v && v.length <= 64);
@@ -1085,7 +1219,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
         const looksLikeTipoField =
           (kn.includes('pcd') && kn.includes('tipo')) ||
           (kn.includes('deficiencia') && (kn.includes('tipo') || kn.includes('qual'))) ||
-          kn.includes('tipodedeficiencia');
+          (kn.includes('necessidade') && kn.includes('especial')) ||
+          kn.includes('tipodedeficiencia') ||
+          kn.includes('qualdeficiencia') ||
+          kn.includes('deficienciadescrita') ||
+          kn.includes('deficienciadeclarada');
         if (!looksLikeTipoField) continue;
         const raw = String(v || '').trim();
         if (!raw) continue;
@@ -1248,14 +1386,43 @@ export function HomePage({ onNavigate }: HomePageProps) {
           a,
           'tempo_atuacao',
           'Tempo de atuação',
+          'tempo de atuação',
           'experiencia',
+          'Experiência',
+          'experiência',
+          'experiencia_cultural',
+          'Experiência cultural',
+          'experiencia profissional',
+          'Experiência profissional',
+          'ano_inicio',
+          'Ano de início',
+          'ano de inicio',
+          'ano de início das atividades',
+          'início das atividades',
+          'inicio das atividades',
+          'inicio_atividade',
+          'Início da atividade',
+          'desde quando atua',
+          'Desde quando atua',
+          'há quanto tempo atua',
+          'Quanto tempo atua',
           'anos',
           'Anos de atuação',
+          'anos_atuacao',
+          'anos de atuação cultural',
+          'tempo_atividade',
+          'tempo de atividade',
           'atuacao_cultural',
-          'tempo de experiência'
+          'atuação cultural',
+          'tempo de experiência',
+          'trajetória cultural',
+          'carreira cultural',
+          'ano_fundacao',
+          'Ano de fundação'
         ).trim() || findExperienciaRawFallback(a)
         );
-        if (exp) bump(expMap, exp.length > 32 ? `${exp.slice(0, 29)}…` : exp);
+        const expNorm = normalizarExperienciaCultural(exp);
+        if (expNorm) bump(expMap, expNorm);
 
         const nat = findFieldValue(
           a,
@@ -1288,8 +1455,23 @@ export function HomePage({ onNavigate }: HomePageProps) {
             const cpfDig = String(findFieldValue(row, 'cpf', 'CPF', 'documento', 'Documento') || '').replace(/\D/g, '');
             if (cpfDig.length >= 11 && cpfJaContouEstado.has(cpfDig)) return;
             const ec = normalizeEstadoCivil(findEstadoCivil(row));
-            if (!ec) return;
-            bump(estadoMap, ec);
+            if (ec) bump(estadoMap, ec);
+            const exp = normalizarExperienciaCultural(
+              findFieldValue(
+                row,
+                'tempo_atuacao',
+                'Tempo de atuação',
+                'tempo de atuação',
+                'experiencia',
+                'Experiência',
+                'experiência',
+                'ano_inicio',
+                'Ano de início',
+                'desde quando atua',
+                'anos'
+              ).trim() || findExperienciaRawFallback(row)
+            );
+            if (exp) bump(expMap, exp);
             if (cpfDig.length >= 11) cpfJaContouEstado.add(cpfDig);
           });
         }
@@ -1536,9 +1718,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
             item.Comunidade ||
             ''
         ).trim();
-        const c = canonicalBairroIlhabela(raw, end);
-        const label = (c || raw).replace(/\s+/g, ' ').trim();
+        const label = canonicalBairroIlhabela(raw, end).replace(/\s+/g, ' ').trim();
         if (!label || label.length > 60 || looksLikeEnderecoCompleto(label)) return '';
+        // Só entra no gráfico se for uma localidade reconhecida; evita ruas/endereços virarem "bairros".
+        if (!getBairroCoords(label)) return '';
         return label;
       };
 
@@ -1599,43 +1782,97 @@ export function HomePage({ onNavigate }: HomePageProps) {
       .slice(0, 5);
   }, [refreshKey]);
 
-  /** Exibe evolução de investimento — usa dados estáticos quando localStorage estiver vazio. */
+  /** Exibe evolução de investimento — usa dados estáticos quando localStorage estiver vazio ou projetos ausentes. */
   const evolucaoInvestimentoCharts = useMemo(() => {
+    const fallbackFromBreakdown = () => {
+      const anoMap = new Map<number, number>();
+      (resumoGlobal.breakdownEditais || []).forEach((ed: any) => {
+        const valor = Number(ed.valor) || 0;
+        if (valor <= 0) return;
+        const yearText = String(ed.ano || ed.nome || ed.chave || '');
+        const yearMatch = yearText.match(/(19[5-9]\d|20[0-4]\d)/);
+        const ano = yearMatch ? Number(yearMatch[1]) : 0;
+        if (!ano || ano < 1990) return;
+        anoMap.set(ano, (anoMap.get(ano) || 0) + valor);
+      });
+      return Array.from(anoMap.entries())
+        .map(([ano, valor]) => ({ ano: String(ano), valor: Number(valor) || 0 }))
+        .filter((row) => row.valor > 0)
+        .sort((a, b) => parseInt(a.ano, 10) - parseInt(b.ano, 10));
+    };
+
     const raw = localStorage.getItem('editais_imported_data');
     try {
       const parsed = raw
         ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
         : (DADOS_ESTATICOS as unknown as Record<string, any>);
-      const projetos = (parsed.projetos || []) as any[];
-      if (projetos.length === 0) return [];
+      const rawProjetos = (parsed.projetos || []) as any[];
+      const projetos = rawProjetos.length > 0 ? rawProjetos : (DADOS_ESTATICOS.projetos as any[]);
+      const mapeamento2020 = Array.isArray(parsed.mapeamento) && parsed.mapeamento.length > 0
+        ? parsed.mapeamento
+        : (DADOS_ESTATICOS.mapeamento as any[]);
+      const cadastrosComValor = [
+        ...(parsed.agentes || []),
+        ...(parsed.grupos || []),
+        ...(parsed.espacos || []),
+        ...mapeamento2020,
+      ];
+      if (projetos.length === 0 && cadastrosComValor.length === 0) return [];
       const anoMap = new Map<number, number>();
-      projetos.forEach((p: any) => {
-        const st = (p.status || p.Status || '').toLowerCase();
-        const isContempByStatus =
-          st.includes('contemplado') ||
-          st.includes('aprovado') ||
-          st.includes('classificado') ||
-          st.includes('selecionado');
-        const isContempByFlag = p.eh_contemplado === true || p.eh_contemplado === 'true' || p.eh_contemplado === 1;
-        if (!isContempByStatus && !isContempByFlag) return;
-        let ano = parseInt(String(p._anoOrigem || p.ano || ''), 10);
+
+      const getAnoRegistro = (p: any, fallbackAno = 0) => {
+        let ano = parseInt(String(p._anoOrigem || p.ano || p.Ano || p.edital_ano || p.anoEdital || ''), 10);
         if (!Number.isFinite(ano) || ano < 1990) {
           const m = String(p._editalOrigem || p.edital || p.Edital || p['Edital'] || '').match(/(\d{4})/);
-          ano = m ? parseInt(m[1], 10) : 0;
+          ano = m ? parseInt(m[1], 10) : fallbackAno;
         }
+        return ano;
+      };
+
+      const getValorRegistro = (p: any) =>
+        getProjetoValorNormalizado(p) ||
+        parseBRLValue(
+          p.valor ||
+            p.Valor ||
+            p.value ||
+            p['Valor (R$)'] ||
+            p.valor_aprovado ||
+            p.valorAprovado ||
+            p.valor_contemplado ||
+            p.valorContemplado ||
+            p.premio ||
+            p.prêmio ||
+            p['Prêmio'] ||
+            0
+        );
+
+      projetos.forEach((p: any) => {
+        const valor = getValorRegistro(p);
+        const isContemp = isProjetoContemplado(p) || p.eh_contemplado === true || p.eh_contemplado === 'true' || valor > 0;
+        if (!isContemp || valor <= 0) return;
+        const ano = getAnoRegistro(p);
         if (!ano || ano < 1990) return;
-        const valor = parseBRLValue(p.valor || p.Valor || p.value || p['Valor (R$)'] || 0);
         anoMap.set(ano, (anoMap.get(ano) || 0) + valor);
       });
+
+      cadastrosComValor.forEach((p: any) => {
+        const valor = getValorRegistro(p);
+        const isContemp = p.eh_contemplado === true || p.eh_contemplado === 'true' || p.contemplado === true || valor > 0;
+        if (!isContemp || valor <= 0) return;
+        const ano = getAnoRegistro(p, 2020);
+        if (!ano || ano < 1990) return;
+        anoMap.set(ano, (anoMap.get(ano) || 0) + valor);
+      });
+
       const arr = Array.from(anoMap.entries())
         .map(([ano, valor]) => ({ ano: String(ano), valor }))
         .sort((a, b) => parseInt(a.ano, 10) - parseInt(b.ano, 10));
-      if (arr.length === 0) return [];
-      return fillYearGaps(arr.map((r) => ({ ...r, valor: Number(r.valor) || 0 })));
+      if (arr.length === 0) return fallbackFromBreakdown();
+      return arr.map((r) => ({ ...r, valor: Number(r.valor) || 0 }));
     } catch {
-      return [];
+      return fallbackFromBreakdown();
     }
-  }, [refreshKey]);
+  }, [refreshKey, resumoGlobal.breakdownEditais]);
 
   const categoriasCharts = useMemo(() => {
     const raw = localStorage.getItem('editais_imported_data');
@@ -1643,7 +1880,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
       const parsed = raw
         ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
         : (DADOS_ESTATICOS as unknown as Record<string, any>);
-      const projetos = (parsed.projetos || []) as any[];
+      const rawProjetos = (parsed.projetos || []) as any[];
+      const projetos = rawProjetos.length > 0 ? rawProjetos : (DADOS_ESTATICOS.projetos as any[]);
       if (projetos.length === 0) return [];
       const catMap = new Map<string, { qtd: number; valor: number }>();
       projetos.forEach((p: any) => {
@@ -1709,7 +1947,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
   }, [categoriasCharts]);
   
   const bairrosComIds = useMemo(() => {
-    return distribuicaoPorBairro.map((item, idx) => ({
+    const top = distribuicaoPorBairro.slice(0, 14);
+    const demais = distribuicaoPorBairro.slice(14);
+    const rows = [...top];
+    const demaisQtd = demais.reduce((acc, item) => acc + (Number(item.qtd) || 0), 0);
+    if (demaisQtd > 0) rows.push({ nome: 'Demais localidades', qtd: demaisQtd, valor: 0 });
+
+    return rows.map((item, idx) => ({
       ...item,
       qtd: Number(item.qtd) || 0,
       id: `bairro-${item.nome}-${idx}`,
@@ -1717,20 +1961,28 @@ export function HomePage({ onNavigate }: HomePageProps) {
     }));
   }, [distribuicaoPorBairro]);
 
+  const evolucaoComAcumulado = useMemo(() => {
+    let acumulado = 0;
+    return evolucaoComIds.map((item) => {
+      acumulado += Number(item.valor) || 0;
+      return { ...item, acumulado };
+    });
+  }, [evolucaoComIds]);
+
   /** Altura controlada (evita gráfico desproporcional com muitos bairros). */
   const bairrosChartHeight = useMemo(() => {
-    const n = distribuicaoPorBairro.length;
+    const n = bairrosComIds.length;
     if (n === 0) return 280;
-    return Math.min(520, Math.max(320, n * 16 + 64));
-  }, [distribuicaoPorBairro.length]);
+    return Math.min(460, Math.max(320, n * 24 + 72));
+  }, [bairrosComIds.length]);
 
   const bairrosYAxisWidth = useMemo(() => {
     let maxLen = 12;
-    for (const r of distribuicaoPorBairro) {
+    for (const r of bairrosComIds) {
       maxLen = Math.max(maxLen, String(r.nome || '').length);
     }
     return Math.min(220, Math.max(108, Math.round(maxLen * 6.4)));
-  }, [distribuicaoPorBairro]);
+  }, [bairrosComIds]);
   
   const breakdownComIds = useMemo(() => {
     if (!resumoGlobal.breakdownEditais || resumoGlobal.breakdownEditais.length === 0) return [];
@@ -1740,6 +1992,16 @@ export function HomePage({ onNavigate }: HomePageProps) {
       valor: ed.valor,
       id: `breakdown-${ed.nome}-${idx}`,
       _chartId: `breakdown-${idx}-${ed.nome.replace(/\s+/g, '-').substring(0, 20)}`
+    }));
+  }, [resumoGlobal.breakdownEditais]);
+
+  const editalResumoVisualData = useMemo(() => {
+    return (resumoGlobal.breakdownEditais || []).map((ed, idx) => ({
+      ...ed,
+      nomeCurto: ed.nome.length > 24 ? `${ed.nome.slice(0, 23)}…` : ed.nome,
+      naoContemplados: Math.max(0, (Number(ed.inscritos) || 0) - (Number(ed.contemplados) || 0)),
+      taxa: ed.inscritos > 0 ? Math.round((ed.contemplados / ed.inscritos) * 100) : 0,
+      _chartId: `edital-visual-${idx}-${ed.nome.replace(/\s+/g, '-')}`,
     }));
   }, [resumoGlobal.breakdownEditais]);
 
@@ -1771,7 +2033,80 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
   /** Pizza: investimento por edital (top 5 + demais) */
   const editalValorPieData = useMemo(() => {
-    const rows = resumoGlobal.breakdownEditais || [];
+    let rows = (resumoGlobal.breakdownEditais || []).filter((e) => (Number(e.valor) || 0) > 0);
+
+    if (!rows.length) {
+      try {
+        const raw = localStorage.getItem('editais_imported_data');
+        const parsed = raw
+          ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
+          : (DADOS_ESTATICOS as unknown as Record<string, any>);
+        const projetos = Array.isArray(parsed.projetos) && parsed.projetos.length > 0
+          ? parsed.projetos
+          : (DADOS_ESTATICOS.projetos as any[]);
+        const cadastros = [
+          ...(Array.isArray(parsed.mapeamento) ? parsed.mapeamento : []),
+          ...(Array.isArray(parsed.agentes) ? parsed.agentes : []),
+          ...(Array.isArray(parsed.grupos) ? parsed.grupos : []),
+          ...(Array.isArray(parsed.espacos) ? parsed.espacos : []),
+        ];
+
+        const byEdital = new Map<string, number>();
+        const addValor = (nome: string, valor: number) => {
+          if (!nome || !Number.isFinite(valor) || valor <= 0) return;
+          byEdital.set(nome, (byEdital.get(nome) || 0) + valor);
+        };
+
+        projetos.forEach((p: any) => {
+          const valor = getProjetoValorNormalizado(p);
+          if ((isProjetoContemplado(p) || valor > 0) && valor > 0) {
+            addValor(getEditalNomeExibicaoProjeto(p), valor);
+          }
+        });
+
+        cadastros.forEach((row: any) => {
+          const valor =
+            getProjetoValorNormalizado(row) ||
+            parseBRLValue(
+              row.valor ||
+                row.Valor ||
+                row.value ||
+                row['Valor (R$)'] ||
+                row.valor_aprovado ||
+                row.valorAprovado ||
+                row.valor_contemplado ||
+                row.valorContemplado ||
+                row.premio ||
+                row.prêmio ||
+                row['Prêmio'] ||
+                0
+            );
+          if (valor <= 0) return;
+          const nome = String(
+            row._editalOrigem ||
+              row.edital_contemplado ||
+              row.edital ||
+              row.Edital ||
+              row.programa ||
+              row.Programa ||
+              'Mapeamento Cultural 2020'
+          ).trim();
+          addValor(nome, valor);
+        });
+
+        rows = Array.from(byEdital.entries()).map(([nome, valor], idx) => ({
+          chave: `valor-${idx}`,
+          nome,
+          ano: '',
+          inscritos: 0,
+          contemplados: 0,
+          valor,
+        }));
+      } catch {
+        rows = [];
+      }
+    }
+
     if (!rows.length) return [];
     const sorted = [...rows].sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0));
     const top = sorted.slice(0, 5);
@@ -1789,21 +2124,85 @@ export function HomePage({ onNavigate }: HomePageProps) {
     return out.filter((x) => x.value > 0);
   }, [resumoGlobal.breakdownEditais]);
 
+  const aldirBlancEditais = useMemo(() => {
+    const rows = resumoGlobal.breakdownEditais || [];
+    const normalizeNum = (value: string) => value.replace(/\D/g, '').replace(/^0+/, '') || value.replace(/\D/g, '');
+    const normalizedRows = rows.map((ed) => ({
+      ed,
+      text: normalizeLooseKey(`${ed.nome} ${ed.chave} ${ed.ano}`).replace(/\//g, ' '),
+      digits: `${ed.nome} ${ed.chave} ${ed.ano}`.replace(/\D/g, ' ').split(/\s+/).filter(Boolean),
+    }));
+
+    return EDITAIS_ALDIR_BLANC_2020.map((base) => {
+      const numeroSemAno = base.numero.split('/')[0];
+      const numeroKey = normalizeNum(numeroSemAno);
+      const chamadaKey = normalizeNum(base.chamada.split('/')[0]);
+      const tipoText = normalizeLooseKey(base.tipo);
+      const tipoKeywords = tipoText.includes('agentes')
+        ? ['agentes', 'agente']
+        : tipoText.includes('grupos')
+          ? ['grupos', 'coletivos', 'coletivo']
+          : tipoText.includes('espacos')
+            ? ['espacos', 'espaco']
+            : ['projetos', 'projeto', 'fomento', 'premiacao', 'premiacao cultural'];
+
+      const match = normalizedRows.find(({ ed, text, digits }) => {
+        const numberMatch =
+          text.includes(base.numero.toLowerCase().replace('/', ' ')) ||
+          digits.some((part) => normalizeNum(part) === numeroKey);
+        const chamadaMatch =
+          text.includes(base.chamada.toLowerCase().replace('/', ' ')) ||
+          digits.some((part) => normalizeNum(part) === chamadaKey);
+        const yearMatch = String(ed.ano || '').includes('2020') || text.includes('2020');
+        const aldirLike = text.includes('aldir') || text.includes('14 017') || text.includes('14017') || text.includes('emergencial');
+        const typeMatch = tipoKeywords.some((kw) => text.includes(kw));
+        return (numberMatch || chamadaMatch || (yearMatch && typeMatch && (aldirLike || text.includes('chamada')))) && yearMatch;
+      })?.ed;
+      const links = resolveEditalLinks(match?.nome || `Edital nº ${base.numero}`, resumoGlobal.customEditalLinks);
+      const inscritos = Number(match?.inscritos) || 0;
+      const contemplados = Number(match?.contemplados) || 0;
+      return {
+        ...base,
+        nomeEditavel: match?.nome || `Edital nº ${base.numero}`,
+        inscritos,
+        contemplados,
+        valor: Number(match?.valor) || 0,
+        taxa: inscritos > 0 ? Math.round((contemplados / inscritos) * 100) : 0,
+        links,
+        origemAdmin: Boolean(match),
+      };
+    });
+  }, [resumoGlobal.breakdownEditais, resumoGlobal.customEditalLinks]);
+
   if (!isMounted) return <div className="min-h-screen ds-dash-page" />;
 
   return (
     <div className="ds-dash-page min-h-screen pb-20 font-sans text-[#1b1b1f]">
       {/* Hero — painel executivo */}
       <section className="relative overflow-hidden border-b border-slate-800/40">
+        {HERO_BACKGROUND_VIDEO_URLS.length > 0 && (
+          <video
+            key={HERO_BACKGROUND_VIDEO_URLS[heroVideoIndex]}
+            className="absolute inset-0 z-0 h-full w-full object-cover opacity-45"
+            src={HERO_BACKGROUND_VIDEO_URLS[heroVideoIndex]}
+            autoPlay
+            muted
+            playsInline
+            preload="metadata"
+            onEnded={() => setHeroVideoIndex((idx) => (idx + 1) % HERO_BACKGROUND_VIDEO_URLS.length)}
+            onError={() => setHeroVideoIndex((idx) => (idx + 1) % HERO_BACKGROUND_VIDEO_URLS.length)}
+            aria-hidden
+          />
+        )}
         <div
-          className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent),linear-gradient(165deg,#070b14_0%,#0f172a_45%,#0c1a33_100%)]"
+          className="absolute inset-0 z-[1] bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent),linear-gradient(165deg,rgba(7,11,20,0.96)_0%,rgba(15,23,42,0.86)_45%,rgba(12,26,51,0.94)_100%)]"
           aria-hidden
         />
 
-        <div className="absolute inset-0 z-[1] bg-slate-950/20" aria-hidden />
+        <div className="absolute inset-0 z-[2] bg-slate-950/20" aria-hidden />
 
         <div
-          className="pointer-events-none absolute inset-0 z-[2] opacity-[0.06]"
+          className="pointer-events-none absolute inset-0 z-[3] opacity-[0.06]"
           style={{
             backgroundImage:
               'linear-gradient(rgba(255,255,255,0.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.14) 1px, transparent 1px)',
@@ -1812,12 +2211,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
           aria-hidden
         />
 
-        <div className="container relative z-10 mx-auto px-6 pb-10 pt-10 md:pb-12 md:pt-14 lg:pt-16">
+        <div className="container relative z-10 mx-auto px-4 pb-14 pt-10 sm:px-6 md:pb-16 md:pt-14 lg:pb-20 lg:pt-16">
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-            className="max-w-3xl"
+            className="max-w-4xl"
           >
             <div className="mb-4 inline-flex flex-wrap items-center gap-2 rounded-full border border-white/15 bg-white/[0.07] px-3.5 py-1.5 text-[0.68rem] font-bold uppercase tracking-[0.14em] text-slate-200 backdrop-blur-md sm:text-[0.72rem]">
               <ShieldCheck size={15} className="shrink-0 text-sky-300" aria-hidden />
@@ -1831,23 +2230,24 @@ export function HomePage({ onNavigate }: HomePageProps) {
               </span>
             </div>
 
-            <h1 className="text-[1.65rem] font-bold leading-[1.12] tracking-tight text-white sm:text-4xl md:text-5xl lg:text-[2.65rem]">
+            <h1 className="max-w-3xl text-[2rem] font-black leading-[1.05] tracking-[-0.045em] text-white sm:text-4xl md:text-5xl lg:text-[3.25rem]">
               Painel de Indicadores Culturais
             </h1>
-            <p className="mt-2 max-w-xl text-sm font-semibold text-sky-200/90 sm:text-base">
-              Cadastro Cultural — dados municipais em gráficos e indicadores
+            <p className="mt-4 max-w-2xl text-sm font-semibold leading-relaxed text-sky-100/90 sm:text-base md:text-lg">
+              Dados municipais em mapas, gráficos e indicadores para acompanhar o território cultural de Ilhabela com transparência.
             </p>
 
-            <div className="mt-6 flex flex-wrap gap-3">
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <Button
                 onClick={() => onNavigate('painel')}
                 variant="contained"
                 size="large"
                 sx={{
+                  width: { xs: '100%', sm: 'auto' },
                   bgcolor: '#ffffff',
                   color: '#0f172a',
                   fontWeight: 800,
-                  borderRadius: '10px',
+                  borderRadius: '14px',
                   textTransform: 'none',
                   px: 3.5,
                   py: 1.35,
@@ -1864,12 +2264,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 variant="outlined"
                 size="large"
                 sx={{
+                  width: { xs: '100%', sm: 'auto' },
                   color: '#e2e8f0',
                   borderColor: 'rgba(255,255,255,0.28)',
                   bgcolor: 'rgba(255,255,255,0.04)',
                   backdropFilter: 'blur(10px)',
                   fontWeight: 700,
-                  borderRadius: '10px',
+                  borderRadius: '14px',
                   textTransform: 'none',
                   px: 3.5,
                   py: 1.35,
@@ -1886,15 +2287,28 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 Transparência e fontes
               </Button>
             </div>
+
+            <div className="mt-8 grid max-w-3xl grid-cols-1 gap-3 text-white sm:grid-cols-3">
+              {[
+                { label: 'Território', value: `${resumoGlobal.todosItens.length.toLocaleString('pt-BR')} registros mapeados` },
+                { label: 'Editais', value: `${resumoGlobal.totaisPublicos.totalEditais || resumoGlobal.breakdownEditais.length} bases consolidadas` },
+                { label: 'Investimento', value: formatBRL(resumoGlobal.totaisPublicos.totalValorInvestido) },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur-md">
+                  <p className="text-[0.62rem] font-black uppercase tracking-[0.16em] text-sky-200/80">{item.label}</p>
+                  <p className="mt-1 text-sm font-extrabold leading-snug text-white">{item.value}</p>
+                </div>
+              ))}
+            </div>
           </motion.div>
         </div>
       </section>
 
       {/* MAPA STORE LOCATOR - Demo */}
-      <section className="container relative z-20 mx-auto mb-12 max-w-7xl px-6 md:mb-14">
-        <div className="rounded-2xl ring-1 ring-slate-900/[0.04] overflow-hidden" style={{ boxShadow: '0 4px 24px -8px rgba(15,23,42,0.10)' }}>
+      <section className="container relative z-20 mx-auto -mt-7 mb-10 max-w-7xl px-4 sm:px-6 md:-mt-9 md:mb-12">
+        <div className="overflow-hidden rounded-3xl ring-1 ring-slate-900/[0.04]" style={{ boxShadow: '0 20px 60px -30px rgba(15,23,42,0.32), 0 4px 24px -8px rgba(15,23,42,0.10)' }}>
           <div className="border-b border-slate-100 bg-white px-5 py-4 md:px-8 md:py-5">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="mb-1 flex items-center gap-2">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#00A38C]" />
               <p className="ds-dash-kicker text-[#00A38C]">Mapa interativo</p>
             </div>
@@ -1905,7 +2319,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
               Pesquise e filtre agentes por bairro, categoria ou tipo. Visualize a distribuição no mapa.
             </p>
           </div>
-          <div className="h-[500px] bg-slate-50">
+          <div className="h-[360px] bg-slate-50 sm:h-[430px] lg:h-[520px]">
             <StoreLocatorMap 
               items={resumoGlobal.todosItens}
               editais={resumoGlobal.breakdownEditais}
@@ -1917,7 +2331,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       </section>
 
       {/* KPIs + gráficos principais — logo no início */}
-      <section className="container relative z-20 mx-auto -mt-6 mb-12 max-w-7xl px-6 md:-mt-10 md:mb-14">
+      <section className="container relative z-20 mx-auto mb-12 max-w-7xl px-4 sm:px-6 md:mb-14">
         <div className="ds-dash-panel overflow-hidden rounded-2xl ring-1 ring-slate-900/[0.04] md:rounded-3xl" style={{ boxShadow: '0 4px 24px -8px rgba(15,23,42,0.10), 0 1px 3px rgba(15,23,42,0.06)' }}>
           <div className="border-b border-slate-100 bg-white px-5 py-4 md:px-8 md:py-5">
             <div className="flex items-center gap-2 mb-1">
@@ -2348,7 +2762,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
       {/* 🆕 SEÇÃO: Breakdown por Edital - Demanda vs Oferta */}
       {resumoGlobal.breakdownEditais && resumoGlobal.breakdownEditais.length > 0 && (
-        <section className="container mx-auto px-6 mb-16 max-w-7xl">
+        <section className="container mx-auto mb-14 max-w-7xl px-4 sm:px-6 md:mb-16">
           <DashboardSectionHeader
             kicker="Demanda e oferta"
             title="Editais: inscritos e contemplados"
@@ -2369,25 +2783,132 @@ export function HomePage({ onNavigate }: HomePageProps) {
               suplentes: 0,
             }))}
           />
+
+          <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Card sx={chartCardSx}>
+              <CardContent className="p-4 md:p-5">
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0]">Participação</p>
+                <h3 className="mb-0.5 text-sm font-black text-slate-900 md:text-base">Inscritos x contemplados</h3>
+                <p className="mb-3 text-[11px] font-medium text-slate-500">Comparação direta por edital.</p>
+                <ResponsiveContainer width="100%" height={260}>
+                  <ComposedChart data={editalResumoVisualData} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
+                    <XAxis dataKey="nomeCurto" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }} interval={0} angle={-18} textAnchor="end" height={78} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} width={34} />
+                    <RechartsTooltip contentStyle={chartTooltipContentStyle} labelFormatter={(_, payload) => String(payload?.[0]?.payload?.nome || '')} />
+                    <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} iconType="circle" iconSize={8} />
+                    <Bar dataKey="inscritos" name="Inscritos" fill="#60a5fa" radius={[8, 8, 0, 0]} maxBarSize={28} />
+                    <Bar dataKey="contemplados" name="Contemplados" fill="#10b981" radius={[8, 8, 0, 0]} maxBarSize={28} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card sx={chartCardSx}>
+              <CardContent className="p-4 md:p-5">
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-600">Eficiência</p>
+                <h3 className="mb-0.5 text-sm font-black text-slate-900 md:text-base">Taxa de contemplação</h3>
+                <p className="mb-3 text-[11px] font-medium text-slate-500">Percentual de contemplados entre inscritos.</p>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={editalResumoVisualData} layout="vertical" margin={{ top: 6, right: 34, left: 8, bottom: 6 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" horizontal={false} />
+                    <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} unit="%" />
+                    <YAxis type="category" dataKey="nomeCurto" tick={{ fontSize: 9, fill: '#475569', fontWeight: 700 }} axisLine={false} tickLine={false} width={118} />
+                    <RechartsTooltip contentStyle={chartTooltipContentStyle} formatter={(value: number) => `${value}%`} labelFormatter={(_, payload) => String(payload?.[0]?.payload?.nome || '')} />
+                    <Bar dataKey="taxa" name="Taxa" fill="#10b981" radius={[0, 8, 8, 0]} maxBarSize={22}>
+                      <LabelList dataKey="taxa" position="right" formatter={(value: unknown) => `${Number(value) || 0}%`} style={{ fontSize: 10, fill: '#0f172a', fontWeight: 800 }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card sx={chartCardSx}>
+              <CardContent className="p-4 md:p-5">
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-blue-600">Orçamento</p>
+                <h3 className="mb-0.5 text-sm font-black text-slate-900 md:text-base">Valor investido</h3>
+                <p className="mb-3 text-[11px] font-medium text-slate-500">Recursos contemplados por edital.</p>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={editalResumoVisualData} margin={{ top: 16, right: 10, left: 0, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" vertical={false} />
+                    <XAxis dataKey="nomeCurto" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }} interval={0} angle={-18} textAnchor="end" height={78} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={formatCompactBRL} width={70} />
+                    <RechartsTooltip contentStyle={chartTooltipContentStyle} formatter={(value: number) => formatBRL(value)} labelFormatter={(_, payload) => String(payload?.[0]?.payload?.nome || '')} />
+                    <Bar dataKey="valor" name="Valor investido" fill="#0b57d0" radius={[9, 9, 0, 0]} maxBarSize={42}>
+                      <LabelList dataKey="valor" position="top" formatter={(value: unknown) => formatCompactBRL(value)} style={{ fontSize: 9, fill: '#0f172a', fontWeight: 800 }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {editalResumoVisualData.map((ed, idx) => {
+              const links = resolveEditalLinks(ed.nome, resumoGlobal.customEditalLinks);
+              return (
+                <div
+                  key={`edital-big-${(ed as { chave?: string }).chave ?? ed.nome}-${idx}`}
+                  className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_14px_36px_-26px_rgba(15,23,42,0.45)]"
+                >
+                  <p className="m-0 line-clamp-2 min-h-[2.35rem] text-[0.78rem] font-black leading-snug text-slate-900">
+                    {ed.nome}
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-2xl bg-blue-50 p-2">
+                      <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-blue-500">Inscritos</p>
+                      <p className="m-0 text-xl font-black tabular-nums text-blue-700">{ed.inscritos.toLocaleString('pt-BR')}</p>
+                    </div>
+                    <div className="rounded-2xl bg-emerald-50 p-2">
+                      <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-emerald-500">Contemplados</p>
+                      <p className="m-0 text-xl font-black tabular-nums text-emerald-700">{ed.contemplados.toLocaleString('pt-BR')}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 rounded-2xl bg-slate-50 p-2">
+                    <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-slate-400">Taxa</p>
+                    <p className="m-0 text-lg font-black tabular-nums text-slate-800">{ed.taxa}%</p>
+                  </div>
+                  <div className="mt-2 rounded-2xl bg-[#0b57d0] p-2 text-white">
+                    <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-blue-100">Valor investido</p>
+                    <p className="m-0 text-base font-black tabular-nums">{formatBRL(ed.valor)}</p>
+                  </div>
+                  {links && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {links.resultado && (
+                        <a href={links.resultado} target="_blank" rel="noopener noreferrer" className="no-underline">
+                          <Chip label="Resultado" size="small" clickable sx={{ bgcolor: '#dbeafe', color: '#1d4ed8', fontWeight: 800, fontSize: '0.62rem', height: 21 }} />
+                        </a>
+                      )}
+                      {links.resumo && (
+                        <a href={links.resumo} target="_blank" rel="noopener noreferrer" className="no-underline">
+                          <Chip label="Resumo" size="small" clickable sx={{ bgcolor: '#d1fae5', color: '#065f46', fontWeight: 800, fontSize: '0.62rem', height: 21 }} />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
           
-          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-[0_8px_30px_-10px_rgba(15,23,42,0.1)] overflow-hidden ring-1 ring-slate-900/[0.03]">
+          <div className="overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-[0_16px_44px_-24px_rgba(15,23,42,0.28)] ring-1 ring-slate-900/[0.03]">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[880px] text-sm">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left px-6 py-4 font-black text-[#1b1b1f] uppercase tracking-wider text-xs">Edital</th>
-                    <th className="text-center px-4 py-4 font-black text-[#1b1b1f] uppercase tracking-wider text-xs">Inscritos</th>
-                    <th className="text-center px-4 py-4 font-black text-[#10b981] uppercase tracking-wider text-xs">Contemplados</th>
-                    <th className="text-center px-4 py-4 font-black text-[#5f5f6a] uppercase tracking-wider text-xs" title="Taxa de contemplação = contemplados / inscritos">
+                  <tr className="border-b border-slate-200 bg-slate-50/90">
+                    <th className="px-6 py-4 text-left text-xs font-black uppercase tracking-wider text-[#1b1b1f]">Edital</th>
+                    <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider text-[#1b1b1f]">Inscritos</th>
+                    <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider text-[#10b981]">Contemplados</th>
+                    <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider text-[#5f5f6a]" title="Taxa de contemplação = contemplados / inscritos">
                       Taxa de Contemplação
                     </th>
-                    <th className="text-right px-6 py-4 font-black text-[#0b57d0] uppercase tracking-wider text-xs">Valor Investido</th>
-                    <th className="text-center px-4 py-4 font-black text-[#5f5f6a] uppercase tracking-wider text-xs">Links</th>
+                    <th className="px-6 py-4 text-right text-xs font-black uppercase tracking-wider text-[#0b57d0]">Valor Investido</th>
+                    <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider text-[#5f5f6a]">Links</th>
                   </tr>
                 </thead>
                 <tbody>
                   {resumoGlobal.breakdownEditais.map((ed, idx) => (
-                    <tr key={`edital-row-${(ed as { chave?: string }).chave ?? ed.nome}-${idx}`} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors">
+                    <tr key={`edital-row-${(ed as { chave?: string }).chave ?? ed.nome}-${idx}`} className="border-b border-slate-100 transition-colors hover:bg-blue-50/40">
                       <td className="px-6 py-4 font-bold text-[#1b1b1f]">{ed.nome}</td>
                       <td className="text-center px-4 py-4">
                         <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-full text-xs">
@@ -2420,12 +2941,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
                             <div className="flex flex-wrap justify-center gap-1">
                               {links.resultado && (
                                 <a href={links.resultado} target="_blank" rel="noopener noreferrer" className="no-underline">
-                                  <Chip label="📄 Resultado" size="small" clickable sx={{ bgcolor: '#dbeafe', color: '#1d4ed8', fontWeight: 600, fontSize: '0.65rem', height: 22, '&:hover': { bgcolor: '#bfdbfe' } }} />
+                                  <Chip label="Resultado" size="small" clickable sx={{ bgcolor: '#dbeafe', color: '#1d4ed8', fontWeight: 700, fontSize: '0.65rem', height: 22, '&:hover': { bgcolor: '#bfdbfe' } }} />
                                 </a>
                               )}
                               {links.resumo && (
                                 <a href={links.resumo} target="_blank" rel="noopener noreferrer" className="no-underline">
-                                  <Chip label="📊 Resumo" size="small" clickable sx={{ bgcolor: '#d1fae5', color: '#065f46', fontWeight: 600, fontSize: '0.65rem', height: 22, '&:hover': { bgcolor: '#a7f3d0' } }} />
+                                  <Chip label="Resumo" size="small" clickable sx={{ bgcolor: '#d1fae5', color: '#065f46', fontWeight: 700, fontSize: '0.65rem', height: 22, '&:hover': { bgcolor: '#a7f3d0' } }} />
                                 </a>
                               )}
                             </div>
@@ -2438,7 +2959,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="bg-gray-50 border-t-2 border-gray-300">
+                  <tr className="border-t-2 border-slate-300 bg-slate-50">
                     <td className="px-6 py-4 font-black text-[#1b1b1f] uppercase text-xs">Total Geral</td>
                     <td className="text-center px-4 py-4 font-black text-blue-800">{resumoGlobal.breakdownEditais.reduce((a, e) => a + e.inscritos, 0)}</td>
                     <td className="text-center px-4 py-4 font-black text-emerald-800">{resumoGlobal.breakdownEditais.reduce((a, e) => a + e.contemplados, 0)}</td>
@@ -2453,7 +2974,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             </div>
           </div>
           
-          <p className="mt-3 text-xs text-[#5f5f6a] italic">
+          <p className="mt-3 text-xs font-medium leading-relaxed text-slate-500">
             * Dados das planilhas importadas no painel Admin. Inscritos = propostas recebidas; contemplados = aprovadas ou selecionadas. A porcentagem é taxa de contemplação (não percentual de execução financeira). Para corrigir totais, links ou ocultar uma linha na página inicial, use o painel Admin.
           </p>
         </section>
@@ -2461,16 +2982,16 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
       {/* 🆕 NOVA SEÇÃO: Indicadores de Diversidade e Inclusão */}
       {(resumoGlobal.totaisPublicos.totalInscritos > 0 || resumoGlobal.totalInscritos > 0) && (
-        <section className="container mx-auto px-6 mb-16 max-w-7xl">
+        <section className="container mx-auto mb-14 max-w-7xl px-4 sm:px-6 md:mb-16">
           <DashboardSectionHeader
             kicker="Inclusão e perfil"
             title="Indicadores de diversidade"
             description="Perfil agregado de agentes, grupos e espaços do cadastro cultural. Cor/raça (negros e pardos) e LGBTQIA+ são eixos diferentes: o primeiro usa só autodeclaração de cor ou raça; o segundo usa orientação sexual, identidade de gênero e gênero — sem misturar um no outro. O total de PcD prioriza colunas de deficiência ou PcD e evita “Sim” genérico de outras perguntas."
           />
           
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-6">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-              <Card sx={{ borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', height: '100%', background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' }}>
+              <Card sx={diversityStatCardSx('linear-gradient(135deg, #f59e0b 0%, #d97706 100%)')}>
                 <CardContent className="p-6">
                   <div className="text-center">
                     <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3">
@@ -2485,7 +3006,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-              <Card sx={{ borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', height: '100%', background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' }}>
+              <Card sx={diversityStatCardSx('linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)')}>
                 <CardContent className="p-6">
                   <div className="text-center">
                     <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3">
@@ -2500,7 +3021,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-              <Card sx={{ borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', height: '100%', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
+              <Card sx={diversityStatCardSx('linear-gradient(135deg, #ec4899 0%, #be185d 100%)')}>
                 <CardContent className="p-6">
                   <div className="text-center">
                     <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3">
@@ -2518,7 +3039,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-              <Card sx={{ borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', height: '100%', background: 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)' }}>
+              <Card sx={diversityStatCardSx('linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)')}>
                 <CardContent className="p-6">
                   <div className="text-center">
                     <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3">
@@ -2533,7 +3054,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
-              <Card sx={{ borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', height: '100%', background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)' }}>
+              <Card sx={diversityStatCardSx('linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)')}>
                 <CardContent className="p-6">
                   <div className="text-center">
                     <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3">
@@ -2548,7 +3069,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
-              <Card sx={{ borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', height: '100%', background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)' }}>
+              <Card sx={diversityStatCardSx('linear-gradient(135deg, #22c55e 0%, #16a34a 100%)')}>
                 <CardContent className="p-6">
                   <div className="text-center">
                     <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3">
@@ -2566,13 +3087,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
           <HomeDiversityCharts data={resumoGlobal.diversityCharts} chartUid={chartUid} />
           
           {/* 📝 Nota explicativa sobre dados de diversidade */}
-          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-            <p className="text-sm text-blue-900 font-medium">
-              <strong>ℹ️ Nota:</strong> Os indicadores combinam <strong>agentes culturais</strong> (mapeamento) e <strong>proponentes de editais</strong>.
+          <div className="mt-6 flex gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+            <ScrollText className="mt-0.5 shrink-0 text-blue-700" size={18} aria-hidden />
+            <p className="text-sm font-medium leading-relaxed text-blue-900">
+              <strong>Nota metodológica:</strong> Os indicadores combinam <strong>agentes culturais</strong> (mapeamento) e <strong>proponentes de editais</strong>.
               <strong> Negros/pardos</strong> vêm apenas de cor/raça declarada. <strong>LGBTQIA+</strong> combina orientação sexual, identidade de gênero e gênero (cadastro único no total); nos gráficos, orientação e identidade aparecem em eixos separados, apartados do racial.
               Gênero, idade e deficiência dependem dos campos na planilha. <strong>Comunidades tradicionais</strong> seguem a mesma regra do painel <strong>Admin</strong> (vínculo identificável); &quot;Sim&quot; genérico sem comunidade não entra no total.
               {resumoGlobal.mulheres === 0 && resumoGlobal.negros === 0 && resumoGlobal.lgbtqia === 0 && (
-                <span className="block mt-1 text-blue-700"> As planilhas importadas ainda não trazem gênero, cor/raça ou dados de orientação/identidade LGBTQIA+ de forma classificável.</span>
+                <span className="mt-1 block text-blue-700">As planilhas importadas ainda não trazem gênero, cor/raça ou dados de orientação/identidade LGBTQIA+ de forma classificável.</span>
               )}
             </p>
           </div>
@@ -2580,7 +3102,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       )}
 
       {/* Seção: Lei Aldir Blanc 2020 — visual moderno (gradiente, elevação, hierarquia) */}
-      <section className="container mx-auto px-6 mb-16 font-sans">
+      <section className="container mx-auto mb-14 px-4 font-sans sm:px-6 md:mb-16">
         <Box
           sx={{
             fontFamily: 'inherit',
@@ -2822,7 +3344,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   </Paper>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {EDITAIS_ALDIR_BLANC_2020.map((edital, idx) => (
+                    {aldirBlancEditais.map((edital, idx) => (
                       <motion.div
                         key={`aldir-blanc-${edital.numero}-${idx}`}
                         initial={{ opacity: 0, y: 12 }}
@@ -2877,21 +3399,35 @@ export function HomePage({ onNavigate }: HomePageProps) {
                                 {edital.numero.split('/')[0]}
                               </Box>
                               <Box sx={{ minWidth: 0, flex: 1 }}>
-                                <Chip
-                                  label={`Chamada ${edital.chamada}`}
-                                  size="small"
-                                  sx={{
-                                    height: 22,
-                                    mb: 0.75,
-                                    fontWeight: 800,
-                                    fontSize: '0.62rem',
-                                    letterSpacing: '0.06em',
-                                    borderRadius: '8px',
-                                    fontFamily: 'inherit',
-                                    bgcolor: 'rgba(15,23,42,0.06)',
-                                    color: '#475569',
-                                  }}
-                                />
+                                <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mb: 0.75 }}>
+                                  <Chip
+                                    label={`Chamada ${edital.chamada}`}
+                                    size="small"
+                                    sx={{
+                                      height: 22,
+                                      fontWeight: 800,
+                                      fontSize: '0.62rem',
+                                      letterSpacing: '0.06em',
+                                      borderRadius: '8px',
+                                      fontFamily: 'inherit',
+                                      bgcolor: 'rgba(15,23,42,0.06)',
+                                      color: '#475569',
+                                    }}
+                                  />
+                                  <Chip
+                                    label={edital.origemAdmin ? 'Dados do Admin' : 'Editável no Admin'}
+                                    size="small"
+                                    sx={{
+                                      height: 22,
+                                      fontWeight: 800,
+                                      fontSize: '0.62rem',
+                                      borderRadius: '8px',
+                                      fontFamily: 'inherit',
+                                      bgcolor: edital.origemAdmin ? 'rgba(16,185,129,0.12)' : 'rgba(11,87,208,0.10)',
+                                      color: edital.origemAdmin ? '#047857' : '#0b57d0',
+                                    }}
+                                  />
+                                </Stack>
                                 <Typography
                                   sx={{
                                     fontFamily: 'inherit',
@@ -2907,6 +3443,61 @@ export function HomePage({ onNavigate }: HomePageProps) {
                                 <Typography variant="caption" sx={{ fontFamily: 'inherit', color: '#64748b', fontWeight: 600, fontSize: '0.75rem' }}>
                                   {edital.tipo}
                                 </Typography>
+                                {edital.origemAdmin && (
+                                  <>
+                                    <div className="mt-3 grid grid-cols-3 gap-2">
+                                      <div className="rounded-xl bg-slate-50 px-2 py-2 text-center">
+                                        <p className="text-[0.62rem] font-black uppercase tracking-wide text-slate-400">Inscritos</p>
+                                        <p className="text-sm font-black text-slate-900">{edital.inscritos}</p>
+                                      </div>
+                                      <div className="rounded-xl bg-emerald-50 px-2 py-2 text-center">
+                                        <p className="text-[0.62rem] font-black uppercase tracking-wide text-emerald-500">Aprovados</p>
+                                        <p className="text-sm font-black text-emerald-700">{edital.contemplados}</p>
+                                      </div>
+                                      <div className="rounded-xl bg-blue-50 px-2 py-2 text-center">
+                                        <p className="text-[0.62rem] font-black uppercase tracking-wide text-blue-500">Taxa</p>
+                                        <p className="text-sm font-black text-blue-700">{edital.taxa}%</p>
+                                      </div>
+                                    </div>
+                                    {edital.valor > 0 && (
+                                      <p className="mt-2 text-xs font-black text-[#0b57d0]">
+                                        {formatBRL(edital.valor)} investidos
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                                {(edital.links?.resultado || edital.links?.resumo || edital.links?.diarioOficial) && (
+                                  <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 2 }}>
+                                    {edital.links.resultado && (
+                                      <Button
+                                        component="a"
+                                        href={edital.links.resultado}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        size="small"
+                                        variant="outlined"
+                                        startIcon={<FileText size={14} />}
+                                        sx={{ borderRadius: '999px', fontWeight: 800, textTransform: 'none', fontSize: '0.72rem' }}
+                                      >
+                                        Resultado
+                                      </Button>
+                                    )}
+                                    {edital.links.resumo && (
+                                      <Button
+                                        component="a"
+                                        href={edital.links.resumo}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        size="small"
+                                        variant="outlined"
+                                        startIcon={<BarChart3 size={14} />}
+                                        sx={{ borderRadius: '999px', fontWeight: 800, textTransform: 'none', fontSize: '0.72rem' }}
+                                      >
+                                        Resumo
+                                      </Button>
+                                    )}
+                                  </Stack>
+                                )}
                               </Box>
                             </Stack>
                           </CardContent>
@@ -3000,6 +3591,28 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     >
                       Acessar resultados
                     </Button>
+                    <Button
+                      variant="outlined"
+                      fullWidth
+                      onClick={() => onNavigate('admin')}
+                      sx={{
+                        mt: 1.25,
+                        fontFamily: 'inherit',
+                        fontWeight: 800,
+                        textTransform: 'none',
+                        borderRadius: '999px',
+                        py: 1.15,
+                        fontSize: '0.86rem',
+                        borderColor: 'rgba(227,6,19,0.24)',
+                        color: CORES_CADASTRO.aldir,
+                        '&:hover': {
+                          borderColor: 'rgba(227,6,19,0.42)',
+                          bgcolor: 'rgba(227,6,19,0.04)',
+                        },
+                      }}
+                    >
+                      Editar dados no Admin
+                    </Button>
                   </Paper>
                 </Stack>
               </div>
@@ -3009,7 +3622,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       </section>
 
       {/* Gráficos de Dados Culturais */}
-      <section className="container mx-auto px-6 mb-16 max-w-7xl">
+      <section className="container mx-auto mb-14 max-w-7xl px-4 sm:px-6 md:mb-16">
         <DashboardSectionHeader
           kicker="Painel público"
           title="Território e investimento (detalhe)"
@@ -3030,13 +3643,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
             <InciclePanel
               kicker="Território"
               title="Distribuição geográfica"
-              subtitle={`Cadastro, mapeamento e proponentes com bairro identificável — ${distribuicaoPorBairro.length} localidade${distribuicaoPorBairro.length === 1 ? '' : 's'} (ordenadas por quantidade).`}
+              subtitle={`Bairros reconhecidos na base de Ilhabela — ${distribuicaoPorBairro.length} localidade${distribuicaoPorBairro.length === 1 ? '' : 's'} identificada${distribuicaoPorBairro.length === 1 ? '' : 's'}. O gráfico mostra as principais e agrupa o restante.`}
               contentMinHeight={bairrosChartHeight}
             >
               <div className="rounded-xl border border-slate-100/90 bg-slate-50/40">
                 <ResponsiveContainer width="100%" height={bairrosChartHeight} debounce={32}>
                   {distribuicaoPorBairro.length > 0 ? (
-                    <BarChart key="bairro-bar-chart" data={bairrosComIds} layout="horizontal" syncId="bairroBar" margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
+                    <BarChart key="bairro-bar-chart" data={bairrosComIds} layout="vertical" syncId="bairroBar" margin={{ top: 6, right: 38, left: 4, bottom: 4 }}>
                       <defs>
                         <linearGradient id={`homeGradBairro-${chartUid}`} x1="0" y1="0" x2="1" y2="0">
                           <stop offset="0%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.95} />
@@ -3069,7 +3682,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
                         minPointSize={4}
                         name="Registros"
                         isAnimationActive={false}
-                      />
+                      >
+                        <LabelList dataKey="qtd" position="right" style={{ fontSize: 11, fill: '#0f172a', fontWeight: 800 }} />
+                      </Bar>
                     </BarChart>
                   ) : (
                     <div className="flex items-center justify-center h-[280px]">
@@ -3080,32 +3695,69 @@ export function HomePage({ onNavigate }: HomePageProps) {
               </div>
             </InciclePanel>
 
-            <InciclePanel kicker="Orçamento" title="Investimento anual" subtitle="Total de recursos públicos contemplados por ano (dados importados)." contentMinHeight={300}>
-              <ResponsiveContainer width="100%" height={280}>
-                {evolucaoInvestimentoCharts.length > 0 ? (
-                  <BarChart key="evolucao-bar-chart" data={evolucaoComIds} syncId="evolucaoBar" margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+            <InciclePanel kicker="Orçamento" title="Investimento anual" subtitle="Barras mostram o investimento do ano; a linha mostra o acumulado no período." contentMinHeight={320}>
+              <ResponsiveContainer width="100%" height={300}>
+                {evolucaoComAcumulado.length > 0 ? (
+                  <ComposedChart key="evolucao-composed-chart" data={evolucaoComAcumulado} syncId="evolucaoBar" margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
                     <defs>
                       <linearGradient id={`homeGradEvolBar-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor={CORES_CADASTRO.secundario} stopOpacity={1} />
                         <stop offset="100%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.88} />
                       </linearGradient>
+                      <linearGradient id={`homeGradEvolArea-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0b57d0" stopOpacity={0.16} />
+                        <stop offset="100%" stopColor="#0b57d0" stopOpacity={0.02} />
+                      </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                     <XAxis dataKey="ano" tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }} axisLine={false} tickLine={false} dy={8} />
                     <YAxis
+                      yAxisId="ano"
                       tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }}
                       axisLine={false}
                       tickLine={false}
-                      tickFormatter={(value) => `${value / 1000}k`}
-                      width={48}
+                      tickFormatter={formatCompactBRL}
+                      width={74}
+                    />
+                    <YAxis
+                      yAxisId="acumulado"
+                      orientation="right"
+                      tick={{ fontSize: 11, fill: '#0b57d0', fontWeight: 700 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={formatCompactBRL}
+                      width={74}
                     />
                     <RechartsTooltip
                       contentStyle={chartTooltipContentStyle}
-                      formatter={(value: any) => formatBRL(value)}
+                      formatter={(value: any, name: string) => [formatBRL(value), name]}
                       cursor={{ fill: 'rgba(11, 87, 208, 0.06)' }}
                     />
-                    <Bar dataKey="valor" fill={`url(#homeGradEvolBar-${chartUid})`} radius={[10, 10, 0, 0]} maxBarSize={56} name="Investimento" />
-                  </BarChart>
+                    <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700, paddingTop: 8 }} iconType="circle" iconSize={8} />
+                    <Area
+                      yAxisId="acumulado"
+                      type="monotone"
+                      dataKey="acumulado"
+                      name="Acumulado"
+                      stroke="transparent"
+                      fill={`url(#homeGradEvolArea-${chartUid})`}
+                      isAnimationActive={false}
+                    />
+                    <Bar yAxisId="ano" dataKey="valor" fill={`url(#homeGradEvolBar-${chartUid})`} radius={[10, 10, 0, 0]} maxBarSize={58} name="Investimento anual">
+                      <LabelList dataKey="valor" position="top" formatter={(value: unknown) => formatCompactBRL(value)} style={{ fontSize: 10, fill: '#0f172a', fontWeight: 800 }} />
+                    </Bar>
+                    <Line
+                      yAxisId="acumulado"
+                      type="monotone"
+                      dataKey="acumulado"
+                      name="Acumulado"
+                      stroke="#0b57d0"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, fill: '#0b57d0', stroke: '#fff', strokeWidth: 2 }}
+                      activeDot={{ r: 6, fill: '#0b57d0', stroke: '#fff', strokeWidth: 2 }}
+                      isAnimationActive={false}
+                    />
+                  </ComposedChart>
                 ) : (
                   <div className="flex items-center justify-center h-full">
                     <p className="text-slate-300 text-xs text-center font-medium">Aguardando importação de dados</p>
@@ -3119,7 +3771,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
       {/* Todos os Editais - Dados Reais (UI inspirada em botões/cartões Material Design) */}
       {resumoGlobal.breakdownEditais && resumoGlobal.breakdownEditais.length > 0 && (
-        <section className="container mx-auto px-6 mb-16 font-sans">
+        <section className="container mx-auto mb-14 px-4 font-sans sm:px-6 md:mb-16">
           <Box
             sx={{
               fontFamily: 'inherit',
@@ -3282,7 +3934,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       )}
 
       {/* Timeline de Editais */}
-      <section className="container mx-auto px-6 mb-16">
+      <section className="container mx-auto mb-14 px-4 sm:px-6 md:mb-16">
         <Card sx={{ borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid #f3f4f6' }}>
           <CardContent className="p-10">
             <div className="flex items-center gap-3 mb-8">
@@ -3300,7 +3952,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       </section>
 
       {/* CTA Final */}
-      <section className="container mx-auto px-6">
+      <section className="container mx-auto px-4 sm:px-6">
         <div className="bg-gradient-to-br from-[#f8fafc] to-[#eef6ff] border border-[#dbe7ff] rounded-[32px] p-12 md:p-16 text-center relative overflow-hidden">
           <div className="relative z-10 max-w-2xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-black text-[#1b1b1f] mb-6">

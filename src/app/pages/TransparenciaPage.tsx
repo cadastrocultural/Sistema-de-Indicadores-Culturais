@@ -2,11 +2,13 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   History, FileText, Download, ExternalLink, Award, Users, 
-  Calendar, CheckCircle2, TrendingUp, Search, Filter, Trophy 
+  Calendar, CheckCircle2, TrendingUp, Search, Filter, Trophy,
+  Edit3, Save, X, AlertTriangle,
 } from 'lucide-react';
 import { 
   Button, Card, CardContent, Typography, Divider, 
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip, Tooltip, Box
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip, Tooltip, Box,
+  TextField, Alert,
 } from '@mui/material';
 import {
   ResponsiveContainer,
@@ -53,6 +55,16 @@ const getCustomEditalLinks = (): Record<string, { resultado?: string; resumo?: s
 
 export function TransparenciaPage() {
   const [serverData, setServerData] = useState<any>(null);
+  const [editingLinksFor, setEditingLinksFor] = useState<string | null>(null);
+  const [linkDraft, setLinkDraft] = useState<{ resultado: string; resumo: string; diarioOficial: string }>({
+    resultado: '',
+    resumo: '',
+    diarioOficial: '',
+  });
+  const [linksFeedback, setLinksFeedback] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
+  const [savingLinks, setSavingLinks] = useState(false);
+  const [buscaParticipante, setBuscaParticipante] = useState('');
+  const [activeTransparenciaTab, setActiveTransparenciaTab] = useState<'visaoGeral' | 'participacoes'>('visaoGeral');
   const chartTooltipStyle: React.CSSProperties = {
     borderRadius: 12,
     border: '1px solid #e2e8f0',
@@ -61,6 +73,29 @@ export function TransparenciaPage() {
     fontWeight: 600,
     padding: '10px 12px',
     background: 'rgba(255,255,255,0.98)',
+  };
+
+  const persistTransparencyData = async (nextData: Record<string, unknown>) => {
+    const normalized = normalizeProjetosOnParsed({
+      ...nextData,
+      _cadastroSavedAt: new Date().toISOString(),
+    });
+    localStorage.setItem('editais_imported_data', JSON.stringify(normalized));
+    setServerData(normalized);
+
+    const base = `https://${projectId}.supabase.co/functions/v1/make-server-2320c79f/save-data`;
+    const resp = await fetch(base, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${publicAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(normalized),
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      throw new Error(`Servidor respondeu ${resp.status}${detail ? `: ${detail}` : ''}`);
+    }
   };
 
   // Carregar dados do servidor como fonte primaria
@@ -194,15 +229,16 @@ export function TransparenciaPage() {
   const rankingProponentes = useMemo(() => {
     const map = new Map<string, { count: number; total: number; editais: Set<string>; displayName: string }>();
 
-    dadosReais.projetos.filter(isProjetoContemplado).forEach((p: any) => {
+    dadosReais.projetos.forEach((p: any) => {
       const key = getRankingProponentKey(p);
       if (!key) return;
       const displayName = getRankingProponentDisplayName(p);
       const edital = getEditalNomeExibicaoProjeto(p);
       const valor = getProjetoValorNormalizado(p);
+      if (valor <= 0 && !isProjetoContemplado(p)) return;
 
       const current = map.get(key) || { count: 0, total: 0, editais: new Set<string>(), displayName: '' };
-      current.count += 1;
+      current.count += isProjetoContemplado(p) || valor > 0 ? 1 : 0;
       current.total += valor;
       current.editais.add(edital);
       if (!current.displayName && displayName) current.displayName = displayName;
@@ -253,6 +289,153 @@ export function TransparenciaPage() {
     });
   }, [breakdownEditais, dadosReais.customEditalLinks]);
 
+  const startEditingLinks = (editalNome: string, links?: { resultado?: string; resumo?: string; diarioOficial?: string } | null) => {
+    setEditingLinksFor(editalNome);
+    setLinksFeedback(null);
+    setLinkDraft({
+      resultado: links?.resultado || '',
+      resumo: links?.resumo || '',
+      diarioOficial: links?.diarioOficial || '',
+    });
+  };
+
+  const cancelEditingLinks = () => {
+    setEditingLinksFor(null);
+    setLinkDraft({ resultado: '', resumo: '', diarioOficial: '' });
+  };
+
+  const saveTransparencyLinks = async (editalNome: string) => {
+    setSavingLinks(true);
+    setLinksFeedback(null);
+    try {
+      const cleanLinks = {
+        resultado: linkDraft.resultado.trim(),
+        resumo: linkDraft.resumo.trim(),
+        diarioOficial: linkDraft.diarioOficial.trim(),
+      };
+      const nextCustomLinks = {
+        ...dadosReais.customEditalLinks,
+        [editalNome]: cleanLinks,
+      };
+      const currentPayload = normalizeProjetosOnParsed(serverData || JSON.parse(localStorage.getItem('editais_imported_data') || '{}'));
+      const nextPayload = {
+        ...currentPayload,
+        customEditalLinks: nextCustomLinks,
+      };
+      localStorage.setItem('custom_edital_links', JSON.stringify(nextCustomLinks));
+      await persistTransparencyData(nextPayload);
+      setLinksFeedback({ type: 'success', text: `Links de "${editalNome}" salvos com sucesso.` });
+      cancelEditingLinks();
+    } catch (err) {
+      console.warn('Falha ao salvar links na Transparência:', err);
+      setLinksFeedback({
+        type: 'warning',
+        text: 'Links salvos neste navegador, mas não foi possível confirmar no servidor. Tente novamente se precisar sincronizar.',
+      });
+      const nextCustomLinks = {
+        ...dadosReais.customEditalLinks,
+        [editalNome]: {
+          resultado: linkDraft.resultado.trim(),
+          resumo: linkDraft.resumo.trim(),
+          diarioOficial: linkDraft.diarioOficial.trim(),
+        },
+      };
+      try {
+        const currentPayload = normalizeProjetosOnParsed(serverData || JSON.parse(localStorage.getItem('editais_imported_data') || '{}'));
+        const fallbackPayload = { ...currentPayload, customEditalLinks: nextCustomLinks, _cadastroSavedAt: new Date().toISOString() };
+        localStorage.setItem('custom_edital_links', JSON.stringify(nextCustomLinks));
+        localStorage.setItem('editais_imported_data', JSON.stringify(fallbackPayload));
+        setServerData(fallbackPayload);
+        cancelEditingLinks();
+      } catch {
+        setLinksFeedback({ type: 'error', text: 'Não foi possível salvar os links nem localmente.' });
+      }
+    } finally {
+      setSavingLinks(false);
+    }
+  };
+
+  const participantesAnalise = useMemo(() => {
+    const projetos = dadosReais.projetos || [];
+    const map = new Map<string, {
+      nomeDisplay: string;
+      projetos: Array<{ nomeProjeto: string; edital: string; anoLabel: string; valor: number; contemplado: boolean }>;
+      editaisCount: Map<string, number>;
+      totalProjetos: number;
+      totalContemplados: number;
+      valorTotal: number;
+      alertas: string[];
+    }>();
+
+    projetos.forEach((p: any) => {
+      const key = getRankingProponentKey(p);
+      if (!key) return;
+      const nomeDisplay = getRankingProponentDisplayName(p);
+      const edital = getEditalNomeExibicaoProjeto(p);
+      const anoLabel = String(p._anoOrigem || p.ano || p.Ano || '').trim();
+      const valor = getProjetoValorNormalizado(p);
+      const contemplado = isProjetoContemplado(p) || valor > 0;
+      const nomeProjeto = String(p.nomeProjeto || p.projeto || p.Projeto || p.titulo || p.Título || p.nome || '').trim();
+
+      const current = map.get(key) || {
+        nomeDisplay,
+        projetos: [],
+        editaisCount: new Map<string, number>(),
+        totalProjetos: 0,
+        totalContemplados: 0,
+        valorTotal: 0,
+        alertas: [],
+      };
+      if (!current.nomeDisplay || current.nomeDisplay === 'Proponente não informado') current.nomeDisplay = nomeDisplay;
+      current.projetos.push({ nomeProjeto: nomeProjeto || '(sem nome)', edital, anoLabel, valor, contemplado });
+      current.totalProjetos += 1;
+      current.totalContemplados += contemplado ? 1 : 0;
+      current.valorTotal += valor;
+      const editalKey = `${edital}||${anoLabel}`;
+      current.editaisCount.set(editalKey, (current.editaisCount.get(editalKey) || 0) + 1);
+      map.set(key, current);
+    });
+
+    const rows = Array.from(map.entries()).map(([internalKey, row]) => {
+      const alertas = Array.from(row.editaisCount.entries())
+        .filter(([, count]) => count > 4)
+        .map(([key, count]) => {
+          const [edital, ano] = key.split('||');
+          return `${edital}${ano ? ` (${ano})` : ''}: ${count} projetos`;
+        });
+      return {
+        internalKey,
+        ...row,
+        alertas,
+        editaisUnicos: Array.from(row.editaisCount.keys()).map((key) => {
+          const [edital, ano] = key.split('||');
+          return `${edital}${ano ? ` (${ano})` : ''}`;
+        }),
+      };
+    }).sort((a, b) => b.totalProjetos - a.totalProjetos || b.valorTotal - a.valorTotal);
+
+    const busca = buscaParticipante.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const filtrados = busca
+      ? rows.filter((row) => {
+          const haystack = [
+            row.nomeDisplay,
+            row.editaisUnicos.join(' '),
+            row.projetos.map((p) => p.nomeProjeto).join(' '),
+          ].join(' ').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          return haystack.includes(busca);
+        })
+      : rows;
+
+    return {
+      totalInscricoes: projetos.length,
+      totalParticipantes: rows.length,
+      totalAlertas: rows.filter((row) => row.alertas.length > 0).length,
+      comContemplacao: rows.filter((row) => row.totalContemplados > 0).length,
+      rows,
+      filtrados,
+    };
+  }, [dadosReais.projetos, buscaParticipante]);
+
   const statsData = [
     { label: 'Inscricoes no Sistema', value: stats.totalInscritos > 0 ? stats.totalInscritos.toString() : '-', sub: 'Historico Acumulado', icon: <Search size={24} /> },
     { label: 'Contemplados', value: stats.totalContemplados > 0 ? stats.totalContemplados.toString() : '-', sub: `${stats.totalEditais} edital(is)`, icon: <CheckCircle2 size={24} /> },
@@ -262,6 +445,34 @@ export function TransparenciaPage() {
 
   return (
     <div className="container mx-auto min-w-0 px-6 py-8 flex flex-col gap-10 bg-[#f8f9fa] min-h-screen font-sans text-[#1b1b1f]">
+      <nav className="flex flex-col gap-2 rounded-[24px] border border-slate-200 bg-white p-2 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.32)] sm:flex-row" aria-label="Abas da página de transparência">
+        {[
+          { id: 'visaoGeral', label: 'Visão geral', helper: 'Indicadores, gráficos, links e ranking' },
+          { id: 'participacoes', label: 'Análise de participações', helper: 'Participantes, editais, valores e alertas' },
+        ].map((tab) => {
+          const selected = activeTransparenciaTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setActiveTransparenciaTab(tab.id as 'visaoGeral' | 'participacoes')}
+              className={`flex-1 rounded-[18px] px-4 py-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0b57d0] ${
+                selected
+                  ? 'bg-[#0b57d0] text-white shadow-[0_12px_28px_-18px_rgba(11,87,208,0.75)]'
+                  : 'bg-slate-50 text-slate-600 hover:bg-blue-50 hover:text-[#0b57d0]'
+              }`}
+            >
+              <span className="block text-sm font-black">{tab.label}</span>
+              <span className={`mt-0.5 block text-[0.72rem] font-semibold ${selected ? 'text-blue-100' : 'text-slate-400'}`}>{tab.helper}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {activeTransparenciaTab === 'visaoGeral' && (
+        <>
       <section className="min-w-0 rounded-2xl border border-[#9ec5ff] bg-white p-3 shadow-[0_1px_2px_rgba(11,87,208,0.08)]">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {statsData.map((stat) => (
@@ -340,16 +551,90 @@ export function TransparenciaPage() {
 
             <Card sx={{ borderRadius: '10px', border: '1px solid #93c5fd', boxShadow: 'none' }}>
               <CardContent className="p-3">
-                <p className="mb-2 text-xs font-bold text-slate-600">Links por edital</p>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="m-0 text-xs font-bold text-slate-600">Links por edital</p>
+                  <Chip label="Editável" size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 800, fontSize: '0.62rem' }} />
+                </div>
+                {linksFeedback && (
+                  <Alert severity={linksFeedback.type} sx={{ mb: 1.5, py: 0.4, fontSize: '0.72rem' }}>
+                    {linksFeedback.text}
+                  </Alert>
+                )}
                 <div className="max-h-[220px] space-y-2 overflow-auto pr-1">
                   {breakdownEditaisChart.map((ed) => (
                     <div key={`links-${ed.nome}`} className="rounded-lg border border-slate-100 bg-slate-50/80 p-2">
-                      <p className="mb-1 text-[11px] font-bold text-[#0b57d0]">{ed.nome}</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ed.links?.resultado ? <a href={ed.links.resultado} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Resultado" size="small" clickable sx={{ bgcolor: '#dbeafe', color: '#1d4ed8', fontWeight: 700, fontSize: '0.66rem' }} /></a> : <Chip label="Resultado" size="small" sx={{ bgcolor: '#f1f5f9', color: '#94a3b8', fontSize: '0.66rem' }} />}
-                        {ed.links?.resumo ? <a href={ed.links.resumo} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Resumo" size="small" clickable sx={{ bgcolor: '#dcfce7', color: '#166534', fontWeight: 700, fontSize: '0.66rem' }} /></a> : <Chip label="Resumo" size="small" sx={{ bgcolor: '#f1f5f9', color: '#94a3b8', fontSize: '0.66rem' }} />}
-                        {ed.links?.diarioOficial && <a href={ed.links.diarioOficial} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Diário Oficial" size="small" clickable sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: '0.66rem' }} /></a>}
+                      <div className="mb-1 flex items-start justify-between gap-2">
+                        <p className="m-0 text-[11px] font-bold text-[#0b57d0]">{ed.nome}</p>
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={<Edit3 size={13} />}
+                          onClick={() => startEditingLinks(ed.nome, ed.links)}
+                          sx={{ minWidth: 0, px: 1, py: 0.2, textTransform: 'none', fontSize: '0.68rem', fontWeight: 800 }}
+                        >
+                          Editar
+                        </Button>
                       </div>
+
+                      {editingLinksFor === ed.nome ? (
+                        <div className="space-y-2">
+                          <TextField
+                            fullWidth
+                            size="small"
+                            label="Link Resultado"
+                            value={linkDraft.resultado}
+                            onChange={(event) => setLinkDraft((draft) => ({ ...draft, resultado: event.target.value }))}
+                            placeholder="https://..."
+                            sx={{ '& input': { fontSize: '0.72rem' }, bgcolor: 'white' }}
+                          />
+                          <TextField
+                            fullWidth
+                            size="small"
+                            label="Link Resumo"
+                            value={linkDraft.resumo}
+                            onChange={(event) => setLinkDraft((draft) => ({ ...draft, resumo: event.target.value }))}
+                            placeholder="https://..."
+                            sx={{ '& input': { fontSize: '0.72rem' }, bgcolor: 'white' }}
+                          />
+                          <TextField
+                            fullWidth
+                            size="small"
+                            label="Diário Oficial"
+                            value={linkDraft.diarioOficial}
+                            onChange={(event) => setLinkDraft((draft) => ({ ...draft, diarioOficial: event.target.value }))}
+                            placeholder="https://..."
+                            sx={{ '& input': { fontSize: '0.72rem' }, bgcolor: 'white' }}
+                          />
+                          <div className="flex flex-wrap gap-1.5">
+                            <Button
+                              size="small"
+                              variant="contained"
+                              startIcon={<Save size={13} />}
+                              disabled={savingLinks}
+                              onClick={() => saveTransparencyLinks(ed.nome)}
+                              sx={{ textTransform: 'none', fontSize: '0.7rem', fontWeight: 800, borderRadius: '999px' }}
+                            >
+                              {savingLinks ? 'Salvando...' : 'Salvar'}
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<X size={13} />}
+                              disabled={savingLinks}
+                              onClick={cancelEditingLinks}
+                              sx={{ textTransform: 'none', fontSize: '0.7rem', fontWeight: 800, borderRadius: '999px' }}
+                            >
+                              Cancelar
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {ed.links?.resultado ? <a href={ed.links.resultado} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Resultado" size="small" clickable sx={{ bgcolor: '#dbeafe', color: '#1d4ed8', fontWeight: 700, fontSize: '0.66rem' }} /></a> : <Chip label="Resultado" size="small" sx={{ bgcolor: '#f1f5f9', color: '#94a3b8', fontSize: '0.66rem' }} />}
+                          {ed.links?.resumo ? <a href={ed.links.resumo} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Resumo" size="small" clickable sx={{ bgcolor: '#dcfce7', color: '#166534', fontWeight: 700, fontSize: '0.66rem' }} /></a> : <Chip label="Resumo" size="small" sx={{ bgcolor: '#f1f5f9', color: '#94a3b8', fontSize: '0.66rem' }} />}
+                          {ed.links?.diarioOficial ? <a href={ed.links.diarioOficial} target="_blank" rel="noopener noreferrer" className="no-underline"><Chip label="Diário Oficial" size="small" clickable sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: '0.66rem' }} /></a> : <Chip label="Diário Oficial" size="small" sx={{ bgcolor: '#f1f5f9', color: '#94a3b8', fontSize: '0.66rem' }} />}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -359,6 +644,146 @@ export function TransparenciaPage() {
         )}
       </section>
 
+        </>
+      )}
+
+      {activeTransparenciaTab === 'participacoes' && (
+      <section className="min-w-0 rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_12px_40px_-24px_rgba(15,23,42,0.28)] md:p-6">
+        <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <Users size={26} className="text-[#0b57d0]" />
+              <h2 className="m-0 text-2xl font-black tracking-tight text-[#0b57d0]">Análise de participantes</h2>
+            </div>
+            <p className="m-0 max-w-3xl text-sm font-medium leading-relaxed text-slate-600">
+              Consulta pública de participantes agrupados por proponente, com total de inscrições, contemplações, editais e alertas de mais de 4 projetos no mesmo edital.
+            </p>
+          </div>
+          {participantesAnalise.totalAlertas > 0 && (
+            <Chip
+              icon={<AlertTriangle size={14} />}
+              label={`${participantesAnalise.totalAlertas} alerta(s)`}
+              sx={{ alignSelf: 'flex-start', bgcolor: '#fff7ed', color: '#c2410c', fontWeight: 900 }}
+            />
+          )}
+        </div>
+
+        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[
+            { label: 'Total de inscrições', value: participantesAnalise.totalInscricoes, color: '#1565c0', bg: '#e3f2fd' },
+            { label: 'Participantes únicos', value: participantesAnalise.totalParticipantes, color: '#2e7d32', bg: '#e8f5e9' },
+            { label: 'Alertas > 4 por edital', value: participantesAnalise.totalAlertas, color: '#c62828', bg: '#fce4ec' },
+            { label: 'Com contemplação', value: participantesAnalise.comContemplacao, color: '#e65100', bg: '#fff3e0' },
+          ].map((item) => (
+            <Paper key={item.label} elevation={0} sx={{ p: 2, borderRadius: 3, bgcolor: item.bg, border: '1px solid rgba(15,23,42,0.06)', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 900, fontSize: { xs: '1.65rem', md: '2rem' }, color: item.color, lineHeight: 1 }}>
+                {item.value.toLocaleString('pt-BR')}
+              </Typography>
+              <Typography sx={{ mt: 0.75, color: item.color, fontWeight: 800, fontSize: '0.76rem' }}>
+                {item.label}
+              </Typography>
+            </Paper>
+          ))}
+        </div>
+
+        <TextField
+          fullWidth
+          size="small"
+          placeholder="Buscar por participante, projeto ou edital..."
+          value={buscaParticipante}
+          onChange={(event) => setBuscaParticipante(event.target.value)}
+          sx={{ mb: 3, bgcolor: 'white' }}
+          InputProps={{ startAdornment: <Search size={16} className="mr-2 text-slate-400" /> }}
+        />
+
+        {participantesAnalise.rows.length === 0 ? (
+          <Alert severity="warning">Nenhum projeto importado para análise de participantes.</Alert>
+        ) : (
+          <TableContainer component={Paper} sx={{ borderRadius: 4, boxShadow: 'none', border: '1px solid #e5e7eb', overflowX: 'auto' }}>
+            <Table size="small" sx={{ minWidth: 980 }}>
+              <TableHead>
+                <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                  <TableCell sx={{ fontWeight: 900, fontSize: '0.75rem' }}>Participante</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 900, fontSize: '0.75rem' }}>Projetos</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 900, fontSize: '0.75rem' }}>Contemplados</TableCell>
+                  <TableCell sx={{ fontWeight: 900, fontSize: '0.75rem' }}>Editais</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 900, fontSize: '0.75rem' }}>Valor recebido</TableCell>
+                  <TableCell sx={{ fontWeight: 900, fontSize: '0.75rem' }}>Projetos</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {participantesAnalise.filtrados.slice(0, 120).map((pessoa) => (
+                  <TableRow
+                    key={pessoa.internalKey}
+                    hover
+                    sx={{
+                      bgcolor: pessoa.alertas.length > 0 ? '#fff7ed' : 'transparent',
+                      '& td': { borderBottomColor: '#edf2f7' },
+                    }}
+                  >
+                    <TableCell sx={{ fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', minWidth: 190 }}>
+                      {pessoa.alertas.length > 0 && (
+                        <Chip label="+4 por edital" size="small" sx={{ bgcolor: '#f97316', color: 'white', fontWeight: 900, fontSize: '0.6rem', mr: 0.5, mb: 0.75 }} />
+                      )}
+                      <span className="block">{pessoa.nomeDisplay}</span>
+                      {pessoa.alertas.length > 0 && (
+                        <span className="mt-1 block text-[0.68rem] font-bold leading-snug text-orange-700">
+                          {pessoa.alertas.join(' · ')}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Chip label={pessoa.totalProjetos} size="small" sx={{ fontWeight: 900, bgcolor: pessoa.totalProjetos > 4 ? '#ef4444' : pessoa.totalProjetos > 2 ? '#f59e0b' : '#e2e8f0', color: pessoa.totalProjetos > 2 ? 'white' : '#1e293b' }} />
+                    </TableCell>
+                    <TableCell align="center">
+                      {pessoa.totalContemplados > 0 ? (
+                        <Chip label={pessoa.totalContemplados} size="small" sx={{ bgcolor: '#16a34a', color: 'white', fontWeight: 900 }} />
+                      ) : (
+                        <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 700 }}>-</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 260 }}>
+                      <Tooltip title={pessoa.editaisUnicos.join(' · ')} enterDelay={350}>
+                        <Box sx={{ fontSize: '0.72rem', color: '#475569', fontWeight: 700, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {pessoa.editaisUnicos.join(', ')}
+                        </Box>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontSize: '0.78rem', fontWeight: 900, color: pessoa.valorTotal > 0 ? '#166534' : '#94a3b8' }}>
+                      {pessoa.valorTotal > 0 ? formatBRL(pessoa.valorTotal) : '-'}
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 360 }}>
+                      <div className="flex flex-col gap-1">
+                        {pessoa.projetos.slice(0, 5).map((projeto, idx) => (
+                          <div key={`${pessoa.internalKey}-${idx}`} className="flex flex-wrap items-center gap-1 text-[0.68rem] leading-snug text-slate-600">
+                            <span className={projeto.contemplado ? 'font-bold text-emerald-700' : 'font-medium'}>{projeto.nomeProjeto}</span>
+                            <Chip label={projeto.edital} size="small" sx={{ height: 17, fontSize: '0.55rem', bgcolor: '#eff6ff', color: '#1d4ed8', fontWeight: 700 }} />
+                            {projeto.contemplado && <Chip label="Contemplado" size="small" sx={{ height: 17, fontSize: '0.55rem', bgcolor: '#dcfce7', color: '#166534', fontWeight: 800 }} />}
+                          </div>
+                        ))}
+                        {pessoa.projetos.length > 5 && (
+                          <span className="text-[0.68rem] font-bold text-slate-400">+ {pessoa.projetos.length - 5} projeto(s)</span>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {participantesAnalise.filtrados.length > 120 && (
+              <Box sx={{ p: 2, textAlign: 'center' }}>
+                <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>
+                  Exibindo 120 de {participantesAnalise.filtrados.length} participantes. Use a busca para filtrar.
+                </Typography>
+              </Box>
+            )}
+          </TableContainer>
+        )}
+      </section>
+
+      )}
+
+      {activeTransparenciaTab === 'visaoGeral' && (
       <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] gap-6 xl:gap-8">
         <div className="min-w-0">
           <div className="flex items-center gap-3 mb-8">
@@ -492,6 +917,7 @@ export function TransparenciaPage() {
           </Card>
         </div>
       </section>
+      )}
     </div>
   );
 }

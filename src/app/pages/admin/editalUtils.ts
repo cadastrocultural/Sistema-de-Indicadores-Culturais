@@ -28,7 +28,23 @@ export const findEditalLinks = (nomeEdital: string, customLinks?: Record<string,
     }
   }
 
-  // 4) Busca nos links hardcoded
+  // 4) Resultados oficiais da Aldir Blanc/Mapeamento 2020.
+  if (/\b2020\b/.test(norm)) {
+    if (norm.includes('fomento') || norm.includes('projetos culturais') || norm.includes('221')) {
+      return LINKS_EDITAIS['Edital de Fomento (2020)'];
+    }
+    if (norm.includes('agentes culturais') || norm.includes('premiacao de agentes') || norm.includes('198')) {
+      return LINKS_EDITAIS['Edital de Premiação de Agentes Culturais (2020)'];
+    }
+    if (norm.includes('grupos') || norm.includes('coletivos') || norm.includes('201')) {
+      return LINKS_EDITAIS['Edital de Grupos e Coletivos (2020)'];
+    }
+    if (norm.includes('espacos') || norm.includes('espaços') || norm.includes('220')) {
+      return LINKS_EDITAIS['Edital de Espaços Culturais (2020)'];
+    }
+  }
+
+  // 5) Busca nos links hardcoded
   for (const [key, links] of Object.entries(LINKS_EDITAIS)) {
     const keyNorm = key.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     if (norm === keyNorm || norm.includes(keyNorm) || keyNorm.includes(norm)) return links;

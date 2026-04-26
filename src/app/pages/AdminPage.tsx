@@ -212,6 +212,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
   const [filtroEdital, setFiltroEdital] = useState<string>(''); // Filtro para tabela de projetos
   const [dedupeEditalKey, setDedupeEditalKey] = useState<string>(''); // Deduplicação por planilha (edital/ano)
   const [buscaProponente, setBuscaProponente] = useState<string>(''); // 🔍 Pesquisa por proponente
+  const [buscaParticipante, setBuscaParticipante] = useState<string>(''); // 🔍 Pesquisa na aba Participações
   const [adminLoginPin, setAdminLoginPin] = useState('');
   const [lastImportDuplicatesRemoved, setLastImportDuplicatesRemoved] = useState(0);
   
@@ -1656,6 +1657,22 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
               }
             }
             
+            // 🎨 ARTISTAS / PARTICIPANTES: extrai nomes de colaboradores do projeto
+            const artistasRaw = (() => {
+              const rk2 = Object.keys(row);
+              const col = rk2.find(k => {
+                const c = k.replace(/[;:.,]/g, '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+                return (c.includes('artista') || c.includes('participante') || c.includes('colaborador') ||
+                  c.includes('membro') || c.includes('equipe') || (c.includes('nome') && c.includes('artista')) ||
+                  c.includes('envolvid') || c.includes('integrante') || c.includes('elenco'));
+              });
+              return col ? String(row[col] || '').trim() : '';
+            })();
+            // Divide por vírgula, ponto-e-vírgula ou quebra de linha e limpa nomes
+            const artistasLista: string[] = artistasRaw
+              ? artistasRaw.split(/[,;\n]+/).map(s => s.trim()).filter(s => s.length >= 2 && s.length <= 120 && /[a-zA-ZÀ-ú]/.test(s))
+              : [];
+
             return {
               ...row,
               proponente: nome,
@@ -1681,6 +1698,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
               ano: parseInt(anoFromRow) || anoLabel,
               lat, lng,
               linksDocumentos: linksDocumentos.length > 0 ? linksDocumentos : undefined,
+              artistas: artistasLista.length > 0 ? artistasLista : undefined,
               _editalOrigem: editalLabel,
               _anoOrigem: anoLabel,
               _importadoEm: new Date().toISOString()
@@ -3406,6 +3424,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
             <Tabs value={tabValue} onChange={(e, newValue) => { setTabValue(newValue); setSelectedRows(new Set()); }} sx={{ mb: 4, borderBottom: 1, borderColor: 'divider' }}>
               <Tab label="🗺️ Mapeamento 2020" />
               <Tab label="📋 Projetos / Editais" />
+              <Tab label="🎭 Análise de Participações" />
             </Tabs>
 
             {/* ABA: MAPEAMENTO 2020 — contém Agentes, Grupos e Espaços */}
@@ -6039,6 +6058,227 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                 )}
               </Box>
             )}
+
+            {/* ═══════════════════════════════════════════════════════════ */}
+            {/* ABA 2: ANÁLISE DE PARTICIPAÇÕES                            */}
+            {/* ═══════════════════════════════════════════════════════════ */}
+            {tabValue === 2 && (() => {
+              const allProjetos = parsedData.projetos || [];
+
+              // Agrupa por nome normalizado do proponente
+              const porPessoa = (() => {
+                const map = new Map<string, {
+                  nomeDisplay: string;
+                  projetos: Array<{
+                    nomeProjeto: string;
+                    edital: string;
+                    anoLabel: string;
+                    chaveEdital: string;
+                    status: string;
+                    valor: number;
+                    eh_contemplado: boolean;
+                    funcao: 'Proponente';
+                  }>;
+                }>();
+
+                allProjetos.forEach((p: any) => {
+                  const nomeRaw = String(p.proponente || p.nome || '').trim();
+                  if (!nomeRaw) return;
+                  const nomeKey = normalizeFullPersonNameForRanking(nomeRaw);
+                  if (!nomeKey) return;
+                  if (!map.has(nomeKey)) map.set(nomeKey, { nomeDisplay: nomeRaw, projetos: [] });
+                  const entry = map.get(nomeKey)!;
+                  const edital = String(p._editalOrigem || p.edital || 'Sem edital');
+                  const ano = String(p._anoOrigem || p.ano || '');
+                  entry.projetos.push({
+                    nomeProjeto: String(p.nomeProjeto || p.nome_projeto || p.nome || ''),
+                    edital,
+                    anoLabel: ano,
+                    chaveEdital: `${edital}||${ano}`,
+                    status: String(p.status || ''),
+                    valor: getProjetoValorNormalizado(p),
+                    eh_contemplado: isProjetoContemplado(p),
+                    funcao: 'Proponente',
+                  });
+                });
+
+                return Array.from(map.values()).map(entry => {
+                  // Conta projetos por edital para detectar excesso
+                  const contPorEdital: Record<string, number> = {};
+                  entry.projetos.forEach(proj => {
+                    contPorEdital[proj.chaveEdital] = (contPorEdital[proj.chaveEdital] || 0) + 1;
+                  });
+                  const alertas = Object.entries(contPorEdital)
+                    .filter(([, n]) => n > 4)
+                    .map(([chave, n]) => {
+                      const [ed, ano] = chave.split('||');
+                      return `${ed}${ano ? ` (${ano})` : ''}: ${n} projetos`;
+                    });
+                  const totalContemplados = entry.projetos.filter(p => p.eh_contemplado).length;
+                  const valorTotal = entry.projetos.filter(p => p.eh_contemplado).reduce((a, p) => a + p.valor, 0);
+                  const editaisUnicos = [...new Set(entry.projetos.map(p => p.chaveEdital))];
+                  return {
+                    ...entry,
+                    totalProjetos: entry.projetos.length,
+                    totalContemplados,
+                    valorTotal,
+                    editaisUnicos,
+                    alertas,
+                  };
+                }).sort((a, b) => b.totalProjetos - a.totalProjetos);
+              })();
+
+              const buscaNorm = buscaParticipante.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+              const filtrados = buscaNorm
+                ? porPessoa.filter(p => {
+                    const nome = p.nomeDisplay.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+                    const projNomes = p.projetos.map(pr => pr.nomeProjeto.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')).join(' ');
+                    return nome.includes(buscaNorm) || projNomes.includes(buscaNorm);
+                  })
+                : porPessoa;
+
+              const totalAlertas = porPessoa.filter(p => p.alertas.length > 0).length;
+
+              return (
+                <Box>
+                  <Alert severity="info" sx={{ mb: 3 }}>
+                    <strong>🎭 Análise de Participações:</strong> Cada proponente é agrupado com todos os seus projetos em todos os editais.
+                    Use esta aba para verificar se alguém submeteu mais de 4 projetos no mesmo edital.
+                  </Alert>
+
+                  {/* Resumo */}
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
+                    <Paper sx={{ p: 2, flex: 1, minWidth: 140, bgcolor: '#e3f2fd', border: '1px solid #90caf9', borderRadius: 2, textAlign: 'center' }}>
+                      <Typography variant="h4" sx={{ fontWeight: 800, color: '#1565c0' }}>{allProjetos.length}</Typography>
+                      <Typography variant="body2" sx={{ color: '#1976d2', fontWeight: 600 }}>Total de inscrições</Typography>
+                    </Paper>
+                    <Paper sx={{ p: 2, flex: 1, minWidth: 140, bgcolor: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: 2, textAlign: 'center' }}>
+                      <Typography variant="h4" sx={{ fontWeight: 800, color: '#2e7d32' }}>{porPessoa.length}</Typography>
+                      <Typography variant="body2" sx={{ color: '#388e3c', fontWeight: 600 }}>Participantes únicos</Typography>
+                    </Paper>
+                    <Paper sx={{ p: 2, flex: 1, minWidth: 140, bgcolor: '#fce4ec', border: '1px solid #f48fb1', borderRadius: 2, textAlign: 'center' }}>
+                      <Typography variant="h4" sx={{ fontWeight: 800, color: '#c62828' }}>{totalAlertas}</Typography>
+                      <Typography variant="body2" sx={{ color: '#c62828', fontWeight: 600 }}>⚠️ Alertas (&gt;4 por edital)</Typography>
+                    </Paper>
+                    <Paper sx={{ p: 2, flex: 1, minWidth: 140, bgcolor: '#fff3e0', border: '1px solid #ffcc80', borderRadius: 2, textAlign: 'center' }}>
+                      <Typography variant="h4" sx={{ fontWeight: 800, color: '#e65100' }}>{porPessoa.filter(p => p.totalContemplados > 0).length}</Typography>
+                      <Typography variant="body2" sx={{ color: '#ef6c00', fontWeight: 600 }}>Com contemplação</Typography>
+                    </Paper>
+                  </Box>
+
+                  {/* Busca */}
+                  <TextField
+                    fullWidth
+                    size="small"
+                    placeholder="Buscar por nome do participante ou nome do projeto..."
+                    value={buscaParticipante}
+                    onChange={e => setBuscaParticipante(e.target.value)}
+                    sx={{ mb: 2 }}
+                    InputProps={{ startAdornment: <Box component="span" sx={{ mr: 1, color: '#64748b' }}>🔍</Box> }}
+                  />
+
+                  {allProjetos.length === 0 ? (
+                    <Alert severity="warning">Nenhum projeto importado. Vá até a aba <strong>Projetos / Editais</strong> e faça o upload da planilha.</Alert>
+                  ) : (
+                    <TableContainer component={Paper} sx={{ borderRadius: 2, border: '1px solid #e0e0e0' }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                            <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Participante</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Projetos</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Contemplados</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Editais</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Valor recebido</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Projetos (detalhes)</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {filtrados.slice(0, 200).map((pessoa, idx) => (
+                            <TableRow
+                              key={idx}
+                              sx={{
+                                bgcolor: pessoa.alertas.length > 0 ? '#fff3e0' : 'transparent',
+                                '&:hover': { bgcolor: pessoa.alertas.length > 0 ? '#ffe0b2' : '#f9fafb' },
+                              }}
+                            >
+                              <TableCell sx={{ fontSize: '0.78rem', fontWeight: 600 }}>
+                                {pessoa.alertas.length > 0 && (
+                                  <Chip label="⚠️ +4 por edital" size="small" sx={{ bgcolor: '#ff9800', color: 'white', fontWeight: 700, fontSize: '0.6rem', mr: 0.5, mb: 0.5, display: 'block', width: 'fit-content' }} />
+                                )}
+                                {pessoa.nomeDisplay}
+                                {pessoa.alertas.length > 0 && (
+                                  <Typography variant="caption" sx={{ display: 'block', color: '#e65100', fontSize: '0.62rem', mt: 0.3 }}>
+                                    {pessoa.alertas.join(' · ')}
+                                  </Typography>
+                                )}
+                              </TableCell>
+                              <TableCell align="center" sx={{ fontSize: '0.78rem', fontWeight: 700 }}>
+                                <Chip
+                                  label={pessoa.totalProjetos}
+                                  size="small"
+                                  sx={{ fontWeight: 800, bgcolor: pessoa.totalProjetos > 4 ? '#ef4444' : pessoa.totalProjetos > 2 ? '#f59e0b' : '#e2e8f0', color: pessoa.totalProjetos > 4 ? 'white' : pessoa.totalProjetos > 2 ? 'white' : '#1e293b' }}
+                                />
+                              </TableCell>
+                              <TableCell align="center" sx={{ fontSize: '0.78rem' }}>
+                                {pessoa.totalContemplados > 0
+                                  ? <Chip label={`✅ ${pessoa.totalContemplados}`} size="small" sx={{ bgcolor: '#4caf50', color: 'white', fontWeight: 700, fontSize: '0.65rem' }} />
+                                  : <Typography variant="caption" sx={{ color: '#9e9e9e' }}>—</Typography>
+                                }
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '0.72rem', color: '#475569', maxWidth: 180 }}>
+                                {pessoa.editaisUnicos.map(ch => {
+                                  const [ed, ano] = ch.split('||');
+                                  return `${ed}${ano ? ` (${ano})` : ''}`;
+                                }).join(', ')}
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontSize: '0.78rem', fontWeight: 700, color: pessoa.valorTotal > 0 ? '#2e7d32' : '#9e9e9e' }}>
+                                {pessoa.valorTotal > 0
+                                  ? `R$ ${pessoa.valorTotal.toLocaleString('pt-BR')}`
+                                  : '—'
+                                }
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '0.7rem', maxWidth: 320 }}>
+                                {pessoa.projetos.map((proj, pIdx) => (
+                                  <Box key={pIdx} sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, mb: 0.3, flexWrap: 'wrap' }}>
+                                    <Box component="span" sx={{ color: proj.eh_contemplado ? '#2e7d32' : '#475569', fontWeight: proj.eh_contemplado ? 700 : 400 }}>
+                                      {proj.nomeProjeto || '(sem nome)'}
+                                    </Box>
+                                    <Chip
+                                      label={proj.funcao}
+                                      size="small"
+                                      sx={{ fontSize: '0.55rem', height: 16, bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 600 }}
+                                    />
+                                    <Chip
+                                      label={`${proj.edital}${proj.anoLabel ? ` ${proj.anoLabel}` : ''}`}
+                                      size="small"
+                                      sx={{ fontSize: '0.55rem', height: 16, bgcolor: '#f3e5f5', color: '#6a1b9a' }}
+                                    />
+                                    {proj.eh_contemplado && (
+                                      <Chip
+                                        label={proj.valor > 0 ? `R$ ${proj.valor.toLocaleString('pt-BR')}` : '✅'}
+                                        size="small"
+                                        sx={{ fontSize: '0.55rem', height: 16, bgcolor: '#e8f5e9', color: '#2e7d32', fontWeight: 700 }}
+                                      />
+                                    )}
+                                  </Box>
+                                ))}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      {filtrados.length > 200 && (
+                        <Box sx={{ p: 2, textAlign: 'center' }}>
+                          <Typography variant="caption" sx={{ color: '#64748b' }}>
+                            Exibindo 200 de {filtrados.length} participantes. Use a busca para filtrar.
+                          </Typography>
+                        </Box>
+                      )}
+                    </TableContainer>
+                  )}
+                </Box>
+              );
+            })()}
 
             <Divider sx={{ my: 4 }} />
 

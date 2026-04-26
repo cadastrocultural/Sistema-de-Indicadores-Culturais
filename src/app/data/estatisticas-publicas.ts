@@ -91,8 +91,20 @@ export function computeEstatisticasPublicas(data: PayloadPublico) {
     };
   }
 
-  const contemImportados = projetos.filter((p) => isProjetoContemplado(p));
+  const contemImportados = projetos.filter((p) => isProjetoContemplado(p) || getProjetoValorNormalizado(p) > 0);
   const valorImportados = contemImportados.reduce((acc: number, p: any) => acc + getProjetoValorNormalizado(p), 0);
+
+  const cadastrosComValor = [
+    ...((data.agentes || []) as any[]),
+    ...((data.grupos || []) as any[]),
+    ...((data.espacos || []) as any[]),
+    ...mapeamento,
+  ];
+  const contemMapeamento = cadastrosComValor.filter((row: any) => {
+    const valor = getProjetoValorNormalizado(row);
+    return row?.eh_contemplado === true || row?.eh_contemplado === 'true' || row?.contemplado === true || valor > 0;
+  });
+  const valorMapeamento = contemMapeamento.reduce((acc: number, row: any) => acc + getProjetoValorNormalizado(row), 0);
 
   const editaisSet = new Set<string>();
   projetos.forEach((p: any) => {
@@ -102,8 +114,8 @@ export function computeEstatisticasPublicas(data: PayloadPublico) {
 
   return {
     totalInscritos: totalMapeamento + projetos.length,
-    totalContemplados: contemImportados.length,
-    totalValorInvestido: valorImportados,
+    totalContemplados: contemImportados.length + contemMapeamento.length,
+    totalValorInvestido: valorImportados + valorMapeamento,
     totalEditais: editaisSet.size,
     projetosInscritos: projetos.length,
     totalMapeamento,

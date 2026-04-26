@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Card, CardContent } from '@mui/material';
+import { AlertTriangle, CheckCircle2, Lightbulb } from 'lucide-react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -53,7 +54,7 @@ export type DiversityChartsPayload = {
 };
 
 /* ─── Constantes visuais ─── */
-const INTER = 'Inter, ui-sans-serif, sans-serif';
+const INTER = 'Poppins, ui-sans-serif, system-ui, sans-serif';
 
 const tooltipSx = {
   borderRadius: 12,
@@ -132,16 +133,17 @@ type InsightLevel = 'info' | 'warn' | 'ok';
 
 function InsightBanner({ level, text }: { level: InsightLevel; text: string }) {
   const cfg = {
-    info: { bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af', icon: '💡' },
-    warn: { bg: '#fefce8', border: '#fde68a', color: '#92400e', icon: '⚠️' },
-    ok:   { bg: '#f0fdf4', border: '#bbf7d0', color: '#166534', icon: '✅' },
+    info: { bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af', Icon: Lightbulb },
+    warn: { bg: '#fefce8', border: '#fde68a', color: '#92400e', Icon: AlertTriangle },
+    ok:   { bg: '#f0fdf4', border: '#bbf7d0', color: '#166534', Icon: CheckCircle2 },
   }[level];
+  const Icon = cfg.Icon;
   return (
     <div
       className="flex items-start gap-2.5 rounded-2xl px-3.5 py-2.5 text-xs font-semibold leading-relaxed"
       style={{ backgroundColor: cfg.bg, border: `1px solid ${cfg.border}`, color: cfg.color }}
     >
-      <span className="shrink-0 text-sm mt-0.5">{cfg.icon}</span>
+      <Icon className="mt-0.5 shrink-0" size={15} aria-hidden />
       <span>{text}</span>
     </div>
   );
@@ -166,17 +168,19 @@ function MiniCard({
   return (
     <Card
       sx={{
-        borderRadius: '20px',
-        border: '1px solid #e8ecf3',
-        boxShadow: '0 1px 3px rgba(15,23,42,0.04), 0 10px 28px rgba(15,23,42,0.07)',
+        borderRadius: '22px',
+        border: '1px solid rgba(15,23,42,0.07)',
+        boxShadow: '0 1px 3px rgba(15,23,42,0.04), 0 18px 42px -22px rgba(15,23,42,0.26)',
         height: '100%',
         minHeight: insight ? 380 : 330,
         minWidth: 0,
         overflow: 'hidden',
-        transition: 'box-shadow 0.25s ease, transform 0.25s ease',
+        background: 'linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)',
+        transition: 'box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease',
         '&:hover': {
-          boxShadow: '0 4px 10px rgba(15,23,42,0.07), 0 20px 48px rgba(15,23,42,0.11)',
-          transform: 'translateY(-3px)',
+          borderColor: 'rgba(11,87,208,0.16)',
+          boxShadow: '0 4px 10px rgba(15,23,42,0.06), 0 24px 56px -24px rgba(15,23,42,0.34)',
+          transform: 'translateY(-2px)',
         },
       }}
     >
@@ -187,7 +191,7 @@ function MiniCard({
         {!subtitle && <div className="mb-3" />}
         <div className="flex-1 min-h-0">
           {empty ? (
-            <div className="flex h-[220px] items-center justify-center rounded-2xl bg-slate-50 text-center text-xs font-medium text-slate-400 border border-slate-100">
+            <div className="flex h-[220px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 text-center text-xs font-semibold text-slate-400">
               Sem dados classificáveis neste campo.
             </div>
           ) : (
@@ -301,7 +305,7 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
       (acc, row) => {
         const nome = normalizeText(row.nome);
         const qtd = Number(row.qtd) || 0;
-        if (nome.includes('homem') || nome.includes('masc')) acc.homens += qtd;
+        if (nome.includes('homem') || nome.includes('homens') || nome.includes('masc')) acc.homens += qtd;
         else if (nome.includes('mulher') || nome.includes('femin')) acc.mulheres += qtd;
         else acc.outros += qtd;
         return acc;
@@ -443,12 +447,12 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
       {/* ═══ Painel principal de diversidade — estilo HR analytics ═══ */}
       <Card
         sx={{
-          borderRadius: '24px',
-          border: '1px solid #e2e8f0',
-          boxShadow: '0 2px 8px rgba(15,23,42,0.05), 0 24px 56px rgba(15,23,42,0.09)',
+          borderRadius: '28px',
+          border: '1px solid rgba(15,23,42,0.07)',
+          boxShadow: '0 2px 8px rgba(15,23,42,0.05), 0 28px 70px -32px rgba(15,23,42,0.35)',
           overflow: 'hidden',
           mb: 4,
-          backgroundColor: '#ffffff',
+          background: 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)',
         }}
       >
         <CardContent sx={{ p: { xs: 3, md: 4 } }}>
@@ -687,17 +691,17 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
             </p>
             <div className="flex justify-center gap-3 flex-wrap">
               {[
-                { label: "Jovens (até 29)", value: inclusaoModeloDados.grupos_prioritarios.juventude, icon: '🧑', bg: '#fef3c7', border: '#fde68a', color: '#92400e' },
-                { label: "PcDs",              value: inclusaoModeloDados.grupos_prioritarios.pcd,       icon: '♿', bg: '#dbeafe', border: '#bfdbfe', color: '#1e40af' },
-                { label: "LGBTQIA+",          value: inclusaoModeloDados.grupos_prioritarios.lgbt,      icon: '🏳️‍🌈', bg: '#fce7f3', border: '#fbcfe8', color: '#9d174d' },
-                { label: "Com. Trad.",         value: inclusaoModeloDados.grupos_prioritarios.comunidades_tradicionais, icon: '🌿', bg: '#dcfce7', border: '#bbf7d0', color: '#166534' },
-              ].map(({ label, value, icon, bg, border, color }) => (
+                { label: "Jovens (até 29)", value: inclusaoModeloDados.grupos_prioritarios.juventude, bg: '#fef3c7', border: '#fde68a', color: '#92400e' },
+                { label: "PcDs",              value: inclusaoModeloDados.grupos_prioritarios.pcd,       bg: '#dbeafe', border: '#bfdbfe', color: '#1e40af' },
+                { label: "LGBTQIA+",          value: inclusaoModeloDados.grupos_prioritarios.lgbt,      bg: '#fce7f3', border: '#fbcfe8', color: '#9d174d' },
+                { label: "Com. Trad.",         value: inclusaoModeloDados.grupos_prioritarios.comunidades_tradicionais, bg: '#dcfce7', border: '#bbf7d0', color: '#166534' },
+              ].map(({ label, value, bg, border, color }) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2.5 rounded-2xl px-4 py-2.5 transition-transform hover:scale-[1.03]"
+                  className="flex items-center gap-2.5 rounded-2xl px-4 py-2.5 transition-transform hover:scale-[1.02]"
                   style={{ backgroundColor: bg, border: `1px solid ${border}` }}
                 >
-                  <span className="text-base leading-none">{icon}</span>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} aria-hidden />
                   <div style={{ fontFamily: INTER }}>
                     <span className="text-xl font-black leading-none" style={{ color }}>{value}</span>
                     <span className="text-[10px] font-semibold ml-1.5" style={{ color }}>{label}</span>
@@ -901,19 +905,21 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
           </ResponsiveContainer>
         </MiniCard>
 
-        <MiniCard kicker="LGBTQIA+" title="Identidade de gênero (texto livre)" subtitle="Campos específicos de identidade de gênero." empty={!hasAnyQty(data.identidadeGeneroDistrib)}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart layout="vertical" data={gIdGen} margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal vertical={false} />
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="nome" width={128} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
-              <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
-              <Bar dataKey="qtd" name="Registros" fill="#a21caf" radius={[0, 6, 6, 0]} maxBarSize={16} isAnimationActive={false}>
-                <LabelList dataKey="qtd" position="right" style={{ fontSize: 10, fill: '#a21caf', fontFamily: INTER, fontWeight: 700 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </MiniCard>
+        {hasAnyQty(data.identidadeGeneroDistrib) && (
+          <MiniCard kicker="LGBTQIA+" title="Identidade de gênero (texto livre)" subtitle="Campos específicos de identidade de gênero." empty={false}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart layout="vertical" data={gIdGen} margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal vertical={false} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="nome" width={128} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
+                <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
+                <Bar dataKey="qtd" name="Registros" fill="#a21caf" radius={[0, 6, 6, 0]} maxBarSize={16} isAnimationActive={false}>
+                  <LabelList dataKey="qtd" position="right" style={{ fontSize: 10, fill: '#a21caf', fontFamily: INTER, fontWeight: 700 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </MiniCard>
+        )}
 
         <MiniCard title="Escolaridade" subtitle="Grau de instrução declarado." empty={!hasAnyQty(data.escolaridade)}
           insight={{ level: 'info', text: 'Escolaridade alta pode indicar viés de seleção — pessoas com menor instrução podem ter dificuldade de acessar editais. Considere oficinas de auxílio à inscrição.' }}>
@@ -1069,63 +1075,71 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
           </ResponsiveContainer>
         </MiniCard>
 
-        <MiniCard kicker="Indicadores culturais" title="Estado civil" subtitle="Categorias declaradas (exceto não informado)." empty={gEstCiv.length === 0}>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={gEstCiv} dataKey="qtd" nameKey="nome" cx="50%" cy="50%" innerRadius={40} outerRadius={76} paddingAngle={2} isAnimationActive={false}>
-                {gEstCiv.map((_, i) => (
-                  <Cell key={_._id} fill={PIE_COLORS[i % PIE_COLORS.length]} stroke="#fff" strokeWidth={2} />
-                ))}
-              </Pie>
-              <Legend wrapperStyle={{ fontSize: 10, fontWeight: 600, fontFamily: INTER }} />
-              <RechartsTooltip contentStyle={tooltipSx} />
-            </PieChart>
-          </ResponsiveContainer>
-        </MiniCard>
+        {gEstCiv.length > 0 && (
+          <MiniCard kicker="Indicadores culturais" title="Estado civil" subtitle="Categorias declaradas (exceto não informado)." empty={false}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={gEstCiv} dataKey="qtd" nameKey="nome" cx="50%" cy="50%" innerRadius={40} outerRadius={76} paddingAngle={2} isAnimationActive={false}>
+                  {gEstCiv.map((_, i) => (
+                    <Cell key={_._id} fill={PIE_COLORS[i % PIE_COLORS.length]} stroke="#fff" strokeWidth={2} />
+                  ))}
+                </Pie>
+                <Legend wrapperStyle={{ fontSize: 10, fontWeight: 600, fontFamily: INTER }} />
+                <RechartsTooltip contentStyle={tooltipSx} />
+              </PieChart>
+            </ResponsiveContainer>
+          </MiniCard>
+        )}
 
-        <MiniCard kicker="Indicadores culturais" title="Renda ou faixa declarada" subtitle="Faixas de renda pessoal/familiar normalizadas." empty={!hasUsefulQty(data.rendaFaixa)}
-          insight={{ level: 'info', text: 'Baixa renda concentrada indica necessidade de facilitar acesso a editais com menores exigências burocráticas e valores menores por projeto.' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart layout="vertical" data={gRenda} margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal vertical={false} />
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="nome" width={128} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
-              <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
-              <Bar dataKey="qtd" name="Registros" fill="#d97706" radius={[0, 6, 6, 0]} maxBarSize={16} isAnimationActive={false}>
-                <LabelList dataKey="qtd" position="right" style={{ fontSize: 10, fill: '#d97706', fontFamily: INTER, fontWeight: 700 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </MiniCard>
+        {hasUsefulQty(data.rendaFaixa) && (
+          <MiniCard kicker="Indicadores culturais" title="Renda ou faixa declarada" subtitle="Faixas de renda pessoal/familiar normalizadas." empty={false}
+            insight={{ level: 'info', text: 'Baixa renda concentrada indica necessidade de facilitar acesso a editais com menores exigências burocráticas e valores menores por projeto.' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart layout="vertical" data={gRenda} margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal vertical={false} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="nome" width={128} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
+                <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
+                <Bar dataKey="qtd" name="Registros" fill="#d97706" radius={[0, 6, 6, 0]} maxBarSize={16} isAnimationActive={false}>
+                  <LabelList dataKey="qtd" position="right" style={{ fontSize: 10, fill: '#d97706', fontFamily: INTER, fontWeight: 700 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </MiniCard>
+        )}
 
-        <MiniCard kicker="Indicadores culturais" title="PcD — tipo declarado" subtitle="Agrupamento a partir do texto quando há declaração positiva." empty={!hasUsefulQty(data.pcdTipos)}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart layout="vertical" data={gPcdTipo} margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal vertical={false} />
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="nome" width={132} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
-              <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
-              <Bar dataKey="qtd" name="Registros" fill="#0891b2" radius={[0, 6, 6, 0]} maxBarSize={16} isAnimationActive={false}>
-                <LabelList dataKey="qtd" position="right" style={{ fontSize: 10, fill: '#0891b2', fontFamily: INTER, fontWeight: 700 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </MiniCard>
+        {hasUsefulQty(data.pcdTipos) && (
+          <MiniCard kicker="Indicadores culturais" title="PcD — tipo declarado" subtitle="Agrupamento a partir do texto quando há declaração positiva." empty={false}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart layout="vertical" data={gPcdTipo} margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal vertical={false} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="nome" width={132} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
+                <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
+                <Bar dataKey="qtd" name="Registros" fill="#0891b2" radius={[0, 6, 6, 0]} maxBarSize={16} isAnimationActive={false}>
+                  <LabelList dataKey="qtd" position="right" style={{ fontSize: 10, fill: '#0891b2', fontFamily: INTER, fontWeight: 700 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </MiniCard>
+        )}
 
-        <MiniCard kicker="Indicadores culturais" title="Tempo de atuação / experiência" subtitle="Valores textuais mais frequentes (anos, tempo de carreira)." empty={!hasAnyQty(data.experienciaCultural)}
-          insight={{ level: 'info', text: 'Alta experiência pode indicar que novos agentes têm dificuldade de entrar — crie categorias específicas para iniciantes e fomento à formação.' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart layout="vertical" data={gExp} margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal vertical={false} />
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="nome" width={128} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
-              <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
-              <Bar dataKey="qtd" name="Registros" fill="#7c3aed" radius={[0, 6, 6, 0]} maxBarSize={16} isAnimationActive={false}>
-                <LabelList dataKey="qtd" position="right" style={{ fontSize: 10, fill: '#7c3aed', fontFamily: INTER, fontWeight: 700 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </MiniCard>
+        {hasAnyQty(data.experienciaCultural) && (
+          <MiniCard kicker="Indicadores culturais" title="Tempo de atuação / experiência" subtitle="Valores textuais mais frequentes (anos, tempo de carreira)." empty={false}
+            insight={{ level: 'info', text: 'Alta experiência pode indicar que novos agentes têm dificuldade de entrar — crie categorias específicas para iniciantes e fomento à formação.' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart layout="vertical" data={gExp} margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal vertical={false} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="nome" width={128} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
+                <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
+                <Bar dataKey="qtd" name="Registros" fill="#7c3aed" radius={[0, 6, 6, 0]} maxBarSize={16} isAnimationActive={false}>
+                  <LabelList dataKey="qtd" position="right" style={{ fontSize: 10, fill: '#7c3aed', fontFamily: INTER, fontWeight: 700 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </MiniCard>
+        )}
 
         <MiniCard kicker="Indicadores culturais" title="Naturalidade / cidade" subtitle="Município de nascimento ou cidade informada no cadastro." empty={!hasAnyQty(data.naturalidadeTop)}
           insight={{ level: 'info', text: 'Naturalidade predominante fora de Ilhabela indica tradição migratória — políticas culturais devem valorizar tanto raízes locais quanto novas influências.' }}>

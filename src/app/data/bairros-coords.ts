@@ -73,7 +73,7 @@ export const BAIRROS_ILHABELA: BairroCoord[] = [
   
   // Outras Localidades
   { nome: 'Cocaia', lat: -23.8097, lng: -45.3605, zona: 'Centro-Sul' },
-  { nome: 'Ilha de Vitória', lat: -23.7798, lng: -45.3498, zona: 'Centro' }, // CORRIGIDO: Pequena ilha no canal próximo à Vila
+  { nome: 'Ilha de Vitória', lat: -23.7410, lng: -44.9670, zona: 'Arquipélago' }, // Ilha oceânica do arquipélago de Ilhabela, NE da ilha principal
   { nome: 'Água Branca', lat: -23.8118, lng: -45.3654, zona: 'Centro-Sul' },
   { nome: 'Morro do Cantagalo', lat: -23.7968, lng: -45.3698, zona: 'Centro' },
   { nome: 'Praia do Pinto', lat: -23.7698, lng: -45.3525, zona: 'Norte' },
@@ -105,13 +105,26 @@ export const BAIRROS_ILHABELA: BairroCoord[] = [
   { nome: 'Bexiga', lat: -23.8385, lng: -45.3730, zona: 'Sul' }, // CORRIGIDO: Sul da ilha (próximo ao Saco da Capela)
   { nome: 'Ilhote', lat: -23.7812, lng: -45.3568, zona: 'Centro' },
   { nome: 'Ilhota', lat: -23.7812, lng: -45.3568, zona: 'Centro' },
-  { nome: 'Ilha de Búzios', lat: -23.7925, lng: -45.3488, zona: 'Centro' },
+  { nome: 'Ilha de Búzios', lat: -23.7830, lng: -45.1280, zona: 'Arquipélago' }, // Ilha oceânica do arquipélago, leste da ilha principal
   { nome: 'Itaguassú', lat: -23.7445, lng: -45.3395, zona: 'Norte' }, // Variação de Itaguaçu
   { nome: 'Green Park', lat: -23.7895, lng: -45.3545, zona: 'Centro' },
   { nome: 'Costa Bela', lat: -23.7865, lng: -45.3505, zona: 'Centro' },
   { nome: 'Costa Bela II', lat: -23.7875, lng: -45.3515, zona: 'Centro' },
   { nome: 'Cabaraú', lat: -23.7925, lng: -45.3595, zona: 'Centro-Sul' },
   { nome: 'Taubaté', lat: -23.7784, lng: -45.3581, zona: 'Centro' }, // Provavelmente erro - usando Centro de Ilhabela
+
+  // Localidades do Mapeamento 2020 / Pesquisas Culturais — ausentes da lista original
+  { nome: 'Itapecerica', lat: -23.8530, lng: -45.3910, zona: 'Sul' }, // SW da ilha, entre Feiticeira e Curral (Av. Gov. Covas Jr.)
+  { nome: 'Piúva', lat: -23.8350, lng: -45.3730, zona: 'Sul' }, // Sul, próximo a Praia Grande/Cocaia
+  { nome: 'Simão', lat: -23.7570, lng: -45.2880, zona: 'Norte-Leste' }, // Praia do Simão — costa leste/NE
+  { nome: 'Praia do Simão', lat: -23.7570, lng: -45.2880, zona: 'Norte-Leste' },
+  { nome: 'Ilha da Cabras', lat: -23.8220, lng: -45.3740, zona: 'Centro-Sul' }, // Ilhota próxima à área de Perequê
+  { nome: 'Ilha das Cabras', lat: -23.8220, lng: -45.3740, zona: 'Centro-Sul' },
+  { nome: 'Zabumba', lat: -23.8065, lng: -45.3625, zona: 'Centro-Sul' }, // Sub-localidade de Barra Velha Alta
+  { nome: 'Barra Velha Alta', lat: -23.8065, lng: -45.3625, zona: 'Centro-Sul' },
+  { nome: 'Morro dos Mineiros', lat: -23.8125, lng: -45.3635, zona: 'Centro-Sul' }, // Morro próximo ao Perequê
+  { nome: 'Boa Vista', lat: -23.8030, lng: -45.3625, zona: 'Centro-Sul' }, // Localidade próxima a Barra Velha
+  { nome: 'Saco do Indaiá', lat: -23.8310, lng: -45.3300, zona: 'Sul-Leste' }, // Enseada próxima a Indaiaúba
 ];
 
 // Função auxiliar para normalizar strings (remove acentos e espaços extras)
@@ -135,11 +148,26 @@ const BAIRRO_ALIASES: Record<string, string> = {
   'saco da capela': 'Saco da Capela',
   'santa teresa': 'Santa Tereza',
   juliao: 'Julião',
+  giuliao: 'Julião', // Variação ortográfica encontrada em dados do mapeamento
   siriuba: 'Siriúba',
+  'siriuba ii': 'Siriúba',
+  'siriuba 2': 'Siriúba',
   'ilha bela': 'Centro',
   ilhabela: 'Centro',
   'ilhabela/sp': 'Centro',
   'ilhabela - sp': 'Centro',
+  itapecerica: 'Itapecerica',
+  piuva: 'Piúva',
+  simao: 'Simão',
+  'ilha da cabras': 'Ilha da Cabras',
+  'ilha das cabras': 'Ilha da Cabras',
+  zabumba: 'Zabumba',
+  'barra velha alta': 'Zabumba',
+  'morro dos mineiros': 'Morro dos Mineiros',
+  'boa vista': 'Boa Vista',
+  'saco do indaia': 'Saco do Indaiá',
+  'centro/vila': 'Centro',
+  'centro vila': 'Centro',
 };
 
 // Função para buscar coordenadas por nome de bairro
@@ -349,10 +377,10 @@ export const ILHABELA_CENTER = {
   zoom: 11
 };
 
-// Limites geográficos de Ilhabela
+// Limites geográficos de Ilhabela (inclui ilhas oceânicas do arquipélago: Búzios e Vitória)
 export const ILHABELA_BOUNDS = {
   north: -23.68,
   south: -23.93,
   west: -45.40,
-  east: -45.24
+  east: -44.90  // Expandido para incluir Ilha de Búzios (~-45.13) e Ilha de Vitória (~-44.97)
 };
