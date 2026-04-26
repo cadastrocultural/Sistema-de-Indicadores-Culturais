@@ -223,7 +223,7 @@ export default function StoreLocatorMap({
                   className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
                 >
                   <option value="">Todos</option>
-                  {tipos.map(t => (
+                  {allTipos.map(t => (
                     <option key={t} value={t}>
                       {TIPO_EMOJI[t]} {t.charAt(0).toUpperCase() + t.slice(1)}
                     </option>
@@ -295,7 +295,7 @@ export default function StoreLocatorMap({
             <span className="font-semibold text-slate-600">
               {filteredItems.length} de {items.length} registros
             </span>
-            <span className="text-slate-400">{bairros.length} bairros</span>
+            <span className="text-slate-400">{allBairros.length} bairros</span>
           </div>
         </div>
 
@@ -330,7 +330,7 @@ export default function StoreLocatorMap({
                     )}
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] font-bold text-slate-400 uppercase">{item.bairro}</span>
-                      {item.tipo === 'edital' && item.valor && (
+                      {item.tipo === 'projeto' && item.valor && (
                         <span className="text-[10px] font-bold text-emerald-600">{formatBRL(item.valor)}</span>
                       )}
                     </div>
@@ -428,7 +428,7 @@ export default function StoreLocatorMap({
                     {item.proponente && (
                       <div className="text-xs text-slate-600 mb-1">Proponente: {item.proponente}</div>
                     )}
-                    {item.tipo === 'edital' && item.valor && (
+                    {item.tipo === 'projeto' && item.valor && (
                       <div className="text-sm font-black text-emerald-600">{formatBRL(item.valor)}</div>
                     )}
                     <button
