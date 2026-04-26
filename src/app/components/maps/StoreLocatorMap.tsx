@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
-import { LocationOn, Person, Business, Group, Search, Filter, Close } from '@mui/icons-material'
-import { SvgIcon } from '@mui/material'
+import { LocationOn, Search, Filter, Close } from '@mui/icons-material'
 
 interface CultureItem {
   id: string
@@ -15,6 +14,10 @@ interface CultureItem {
   raca?: string
   valor?: number
   eh_contemplado?: boolean
+  edital?: string
+  ano?: string
+  proponente?: string
+  [key: string]: any
 }
 
 interface StoreLocatorMapProps {
@@ -59,27 +62,59 @@ export default function StoreLocatorMap({
   const [filterBairro, setFilterBairro] = useState('')
   const [filterCategoria, setFilterCategoria] = useState('')
   const [filterTipo, setFilterTipo] = useState('')
+  const [filterEdital, setFilterEdital] = useState('')
   const [selectedItem, setSelectedItem] = useState<CultureItem | null>(null)
-  const [isMobile, setIsMobile] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
 
-  const bairros = useMemo(() => {
-    const set = new Set(items.map(i => i.bairro).filter(b => b && b !== 'Não informado'))
-    return Array.from(set).sort()
+  // DEDUPLICATION: Keep latest record per agent/group/space (by edital or name)
+  const deduplicatedItems = useMemo(() => {
+    const seen = new Map<string, CultureItem>()
+    
+    items.forEach(item => {
+      const key = `${item.tipo}-${item.nome}-${item.edital || ''}`
+      const existing = seen.get(key)
+      
+      // Keep the one with most data (prioritize items with lat/lng)
+      if (!existing) {
+        seen.set(key, item)
+      } else if (item.lat && item.lng && (!existing.lat || !existing.lng)) {
+        seen.set(key, item)
+      } else if (item.edital && item.edital !== existing.edital) {
+        // If different edital, keep the most recent (check by ano or order)
+        const itemYear = parseInt(item.ano || '0')
+        const existingYear = parseInt(existing.ano || '0')
+        if (itemYear >= existingYear) {
+          seen.set(key, item)
+        }
+      }
+    })
+    
+    return Array.from(seen.values())
   }, [items])
+
+  // Unique values for filters
+  const bairros = useMemo(() => {
+    const set = new Set(deduplicatedItems.map(i => i.bairro).filter(b => b && b !== 'Não informado' && b !== 'não informado'))
+    return Array.from(set).sort()
+  }, [deduplicatedItems])
 
   const categorias = useMemo(() => {
-    const set = new Set(items.map(i => i.categoria).filter(c => c))
+    const set = new Set(deduplicatedItems.map(i => i.categoria).filter(c => c))
     return Array.from(set).sort()
-  }, [items])
+  }, [deduplicatedItems])
 
-  const tipos = useMemo(() => {
-    return ['agente', 'grupo', 'espaco', 'edital']
-  }, [])
+  const editais = useMemo(() => {
+    const set = new Set(deduplicatedItems.map(i => i.edital).filter(e => e))
+    return Array.from(set).sort()
+  }, [deduplicatedItems])
 
+  const tipos = ['agente', 'grupo', 'espaco', 'edital']
+
+  // Statistics by neighborhood
   const estatisticasPorBairro = useMemo(() => {
     const stats: Record<string, { bairro: string; agente: number; grupo: number; espaco: number; total: number }> = {}
-    items.forEach(item => {
+    
+    deduplicatedItems.forEach(item => {
       const b = item.bairro || 'Não informado'
       if (!stats[b]) stats[b] = { bairro: b, agente: 0, grupo: 0, espaco: 0, total: 0 }
       if (item.tipo === 'agente') stats[b].agente++
@@ -87,23 +122,35 @@ export default function StoreLocatorMap({
       if (item.tipo === 'espaco') stats[b].espaco++
       stats[b].total++
     })
+    
     return Object.values(stats)
       .filter(s => s.bairro !== 'Não informado')
       .sort((a, b) => b.total - a.total)
-  }, [items])
+  }, [deduplicatedItems])
 
+  // Filtered items
   const filteredItems = useMemo(() => {
-    return items.filter(item => {
+    return deduplicatedItems.filter(item => {
       const matchSearch = !searchTerm ||
         item.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.bairro?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.categoria?.toLowerCase().includes(searchTerm.toLowerCase())
+        item.categoria?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.edital?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.proponente?.toLowerCase().includes(searchTerm.toLowerCase())
+      
       const matchBairro = !filterBairro || item.bairro === filterBairro
       const matchCategoria = !filterCategoria || item.categoria === filterCategoria
       const matchTipo = !filterTipo || item.tipo === filterTipo
-      return matchSearch && matchBairro && matchCategoria && matchTipo
+      const matchEdital = !filterEdital || item.edital === filterEdital
+      
+      return matchSearch && matchBairro && matchCategoria && matchTipo && matchEdital
     })
-  }, [items, searchTerm, filterBairro, filterCategoria, filterTipo])
+  }, [deduplicatedItems, searchTerm, filterBairro, filterCategoria, filterTipo, filterEdital])
+
+  // Map points (only with coordinates)
+  const mapPoints = useMemo(() => {
+    return filteredItems.filter(item => item.lat && item.lng)
+  }, [filteredItems])
 
   const handleItemClick = useCallback((item: CultureItem) => {
     setSelectedItem(item)
@@ -115,9 +162,10 @@ export default function StoreLocatorMap({
     setFilterBairro('')
     setFilterCategoria('')
     setFilterTipo('')
+    setFilterEdital('')
   }
 
-  const hasActiveFilters = searchTerm || filterBairro || filterCategoria || filterTipo
+  const hasActiveFilters = searchTerm || filterBairro || filterCategoria || filterTipo || filterEdital
 
   return (
     <div className="flex w-full h-full" style={{ minHeight: 500 }}>
@@ -125,8 +173,8 @@ export default function StoreLocatorMap({
       <div
         className="flex flex-col bg-white border-r border-slate-200/90 overflow-hidden"
         style={{
-          width: isMobile ? '100%' : sidebarWidth,
-          minWidth: isMobile ? undefined : sidebarWidth,
+          width: sidebarWidth,
+          minWidth: sidebarWidth,
         }}
       >
         {/* Search */}
@@ -135,14 +183,13 @@ export default function StoreLocatorMap({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" sx={{ fontSize: 18 }} />
             <input
               type="text"
-              placeholder="Buscar agente, bairro, categoria…"
+              placeholder="Buscar nome, edital, categoria…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none transition-colors"
             />
           </div>
           
-          {/* Filter Toggle */}
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`mt-3 w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-semibold transition-all ${
@@ -155,7 +202,7 @@ export default function StoreLocatorMap({
             Filtros
             {hasActiveFilters && (
               <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
-                {[filterBairro, filterCategoria, filterTipo].filter(Boolean).length}
+                {[filterBairro, filterCategoria, filterTipo, filterEdital].filter(Boolean).length}
               </span>
             )}
           </button>
@@ -163,8 +210,9 @@ export default function StoreLocatorMap({
 
         {/* Filters Panel */}
         {showFilters && (
-          <div className="p-4 border-b border-slate-100 bg-slate-50">
+          <div className="p-4 border-b border-slate-100 bg-slate-50 max-h-[300px] overflow-y-auto">
             <div className="space-y-3">
+              {/* Tipo */}
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Tipo</label>
                 <select
@@ -181,6 +229,22 @@ export default function StoreLocatorMap({
                 </select>
               </div>
               
+              {/* Edital */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Edital</label>
+                <select
+                  value={filterEdital}
+                  onChange={(e) => setFilterEdital(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">Todos ({editais.length})</option>
+                  {editais.map(e => (
+                    <option key={e} value={e}>{e}</option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* Bairro */}
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Bairro</label>
                 <select
@@ -195,6 +259,7 @@ export default function StoreLocatorMap({
                 </select>
               </div>
               
+              {/* Categoria */}
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Categoria</label>
                 <select
@@ -226,7 +291,7 @@ export default function StoreLocatorMap({
         <div className="p-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-blue-50">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-slate-600">
-              {filteredItems.length} de {items.length} registros
+              {filteredItems.length} de {deduplicatedItems.length} registros
             </span>
             <span className="text-slate-400">{bairros.length} bairros</span>
           </div>
@@ -242,7 +307,7 @@ export default function StoreLocatorMap({
           ) : (
             filteredItems.slice(0, 100).map((item, i) => (
               <div
-                key={`${item.id}-${i}`}
+                key={`${item.tipo}-${item.id}-${i}`}
                 onClick={() => handleItemClick(item)}
                 className={`p-3 border-b border-slate-100 cursor-pointer transition-all hover:bg-blue-50 ${
                   selectedItem?.id === item.id ? 'bg-blue-50 border-l-4 border-l-blue-600' : ''
@@ -258,6 +323,9 @@ export default function StoreLocatorMap({
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold text-sm text-slate-800 truncate">{item.nome}</div>
                     <div className="text-xs text-slate-500 mt-0.5">{item.categoria}</div>
+                    {item.edital && (
+                      <div className="text-[10px] text-purple-600 font-medium truncate">{item.edital}</div>
+                    )}
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] font-bold text-slate-400 uppercase">{item.bairro}</span>
                       {item.tipo === 'edital' && item.valor && (
@@ -279,7 +347,7 @@ export default function StoreLocatorMap({
         {/* Bairro Stats */}
         <div className="p-3 border-t border-slate-200 bg-slate-50">
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">
-            Top Bairros
+            Top Bairros ({estatisticasPorBairro.length})
           </div>
           <div className="space-y-1 max-h-32 overflow-y-auto">
             {estatisticasPorBairro.slice(0, 5).map((stat) => (
@@ -320,55 +388,58 @@ export default function StoreLocatorMap({
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution="&copy; OpenStreetMap &copy; CARTO"
           />
-          {filteredItems.map((item, idx) => {
-            if (!item.lat || !item.lng) return null
-            return (
-              <React.Fragment key={`${item.id}-${idx}`}>
-                <CircleMarker
-                  center={[item.lat, item.lng]}
-                  radius={selectedItem?.id === item.id ? 14 : 10}
-                  pathOptions={{
-                    fillColor: TIPO_COLORS[item.tipo],
-                    color: 'transparent',
-                    weight: 0,
-                    fillOpacity: 0.15,
-                  }}
-                />
-                <CircleMarker
-                  center={[item.lat, item.lng]}
-                  radius={selectedItem?.id === item.id ? 8 : 5}
-                  pathOptions={{
-                    fillColor: TIPO_COLORS[item.tipo],
-                    color: '#ffffff',
-                    weight: 2,
-                    fillOpacity: 0.9,
-                  }}
-                  eventHandlers={{
-                    click: () => handleItemClick(item),
-                  }}
-                >
-                  <Popup>
-                    <div className="p-2 min-w-[200px]">
-                      <div className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: TIPO_COLORS[item.tipo] }}>
-                        {TIPO_EMOJI[item.tipo]} {item.tipo} • {item.categoria}
-                      </div>
-                      <div className="font-bold text-sm leading-tight mb-1">{item.nome}</div>
-                      <div className="text-xs text-slate-500 mb-2">{item.bairro}</div>
-                      {item.tipo === 'edital' && item.valor && (
-                        <div className="text-sm font-black text-emerald-600">{formatBRL(item.valor)}</div>
-                      )}
-                      <button
-                        onClick={() => handleItemClick(item)}
-                        className="mt-2 text-xs text-blue-600 hover:underline"
-                      >
-                        Ver detalhes →
-                      </button>
+          {mapPoints.map((item, idx) => (
+            <React.Fragment key={`${item.tipo}-${item.id}-${idx}`}>
+              <CircleMarker
+                center={[item.lat!, item.lng!]}
+                radius={selectedItem?.id === item.id ? 14 : 10}
+                pathOptions={{
+                  fillColor: TIPO_COLORS[item.tipo],
+                  color: 'transparent',
+                  weight: 0,
+                  fillOpacity: 0.15,
+                }}
+              />
+              <CircleMarker
+                center={[item.lat!, item.lng!]}
+                radius={selectedItem?.id === item.id ? 8 : 5}
+                pathOptions={{
+                  fillColor: TIPO_COLORS[item.tipo],
+                  color: '#ffffff',
+                  weight: 2,
+                  fillOpacity: 0.9,
+                }}
+                eventHandlers={{
+                  click: () => handleItemClick(item),
+                }}
+              >
+                <Popup>
+                  <div className="p-2 min-w-[200px]">
+                    <div className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: TIPO_COLORS[item.tipo] }}>
+                      {TIPO_EMOJI[item.tipo]} {item.tipo} • {item.categoria}
                     </div>
-                  </Popup>
-                </CircleMarker>
-              </React.Fragment>
-            )
-          })}
+                    <div className="font-bold text-sm leading-tight mb-1">{item.nome}</div>
+                    <div className="text-xs text-slate-500 mb-1">{item.bairro}</div>
+                    {item.edital && (
+                      <div className="text-[10px] text-purple-600 font-medium mb-1">{item.edital}</div>
+                    )}
+                    {item.proponente && (
+                      <div className="text-xs text-slate-600 mb-1">Proponente: {item.proponente}</div>
+                    )}
+                    {item.tipo === 'edital' && item.valor && (
+                      <div className="text-sm font-black text-emerald-600">{formatBRL(item.valor)}</div>
+                    )}
+                    <button
+                      onClick={() => handleItemClick(item)}
+                      className="mt-2 text-xs text-blue-600 hover:underline"
+                    >
+                      Ver detalhes →
+                    </button>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            </React.Fragment>
+          ))}
         </MapContainer>
 
         {/* Map Legend */}
@@ -401,6 +472,12 @@ export default function StoreLocatorMap({
             </div>
             <div className="font-bold text-sm mb-1">{selectedItem.nome}</div>
             <div className="text-xs text-slate-500 mb-2">{selectedItem.categoria} • {selectedItem.bairro}</div>
+            {selectedItem.edital && (
+              <div className="text-xs text-purple-600 font-medium mb-1">{selectedItem.edital}</div>
+            )}
+            {selectedItem.proponente && (
+              <div className="text-xs text-slate-600 mb-1">Proponente: {selectedItem.proponente}</div>
+            )}
             {selectedItem.genero && (
               <div className="text-xs text-slate-600">Gênero: {selectedItem.genero}</div>
             )}
