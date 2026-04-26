@@ -23,6 +23,7 @@ import {
 } from './admin/projetosDemandaOferta';
 import { computeEstatisticasPublicas } from '../data/estatisticas-publicas';
 import { IlhabelaTerritoryMap } from '../components/maps/IlhabelaTerritoryMap';
+import StoreLocatorMap from '../components/maps/StoreLocatorMap';
 import { InciclePanel } from '../components/dashboard/InciclePanel';
 import { resolveComunidadeTradicional } from './admin/comunidadeTradicionalUtils';
 
@@ -1852,6 +1853,31 @@ export function HomePage({ onNavigate }: HomePageProps) {
               </Button>
             </div>
           </motion.div>
+        </div>
+      </section>
+
+      {/* MAPA STORE LOCATOR - Demo */}
+      <section className="container relative z-20 mx-auto mb-12 max-w-7xl px-6 md:mb-14">
+        <div className="rounded-2xl ring-1 ring-slate-900/[0.04] overflow-hidden" style={{ boxShadow: '0 4px 24px -8px rgba(15,23,42,0.10)' }}>
+          <div className="border-b border-slate-100 bg-white px-5 py-4 md:px-8 md:py-5">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#00A38C]" />
+              <p className="ds-dash-kicker text-[#00A38C]">Mapa interativo</p>
+            </div>
+            <h2 className="text-lg font-extrabold tracking-tight text-slate-900 md:text-xl">
+              Agentes culturais no território
+            </h2>
+            <p className="mt-1 max-w-3xl text-xs font-medium leading-relaxed text-slate-500 sm:text-sm">
+              Pesquise e filtre agentes por bairro, categoria ou tipo. Visualize a distribuição no mapa.
+            </p>
+          </div>
+          <div className="h-[500px] bg-slate-50">
+            <StoreLocatorMap 
+              items={resumoGlobal.todosItens.filter(i => i.lat && i.lng).slice(0, 50)}
+              center={[-23.82, -45.36]}
+              zoom={12}
+            />
+          </div>
         </div>
       </section>
 
