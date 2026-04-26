@@ -14,24 +14,9 @@ type Page = 'home' | 'painel' | 'transparencia' | 'admin' | 'galeria-mapeamento'
 const ADMIN_SESSION_KEY = 'cc_admin_session';
 
 export default function App() {
-  const [adminAuthed, setAdminAuthed] = useState(() => {
-    try {
-      return localStorage.getItem(ADMIN_SESSION_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
+  const [adminAuthed, setAdminAuthed] = useState(false);
 
-  useEffect(() => {
-    try {
-      if (adminAuthed) localStorage.setItem(ADMIN_SESSION_KEY, '1');
-      else localStorage.removeItem(ADMIN_SESSION_KEY);
-    } catch {
-      /* ignore */
-    }
-  }, [adminAuthed]);
-
-  // ✅ PERSISTÊNCIA DE NAVEGAÇÃO: salva no localStorage para manter página após refresh
+  }, [currentPage]);
   const [currentPage, setCurrentPage] = useState<Page>(() => {
     const saved = localStorage.getItem('currentPage');
     return saved === 'home' ||
