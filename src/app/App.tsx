@@ -16,7 +16,6 @@ const ADMIN_SESSION_KEY = 'cc_admin_session';
 export default function App() {
   const [adminAuthed, setAdminAuthed] = useState(false);
 
-  }, [currentPage]);
   const [currentPage, setCurrentPage] = useState<Page>(() => {
     const saved = localStorage.getItem('currentPage');
     return saved === 'home' ||
