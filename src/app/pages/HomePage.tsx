@@ -1907,7 +1907,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
           </div>
           <div className="h-[500px] bg-slate-50">
             <StoreLocatorMap 
-              items={resumoGlobal.todosItens.filter(i => i.lat && i.lng).slice(0, 50)}
+              items={resumoGlobal.todosItens}
+              editais={resumoGlobal.breakdownEditais}
               center={[-23.82, -45.36]}
               zoom={12}
             />

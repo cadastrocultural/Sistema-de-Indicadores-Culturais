@@ -22,6 +22,12 @@ interface CultureItem {
 
 interface StoreLocatorMapProps {
   items: CultureItem[]
+  editais?: Array<{
+    nome: string
+    ano: string
+    inscritos: number
+    contemplados: number
+  }>
   center?: [number, number]
   zoom?: number
   sidebarWidth?: number
@@ -76,6 +82,7 @@ const participatedInEdital = (item: CultureItem, editalName: string): boolean =>
 
 export default function StoreLocatorMap({
   items,
+  editais = [],
   center = [-23.82, -45.36],
   zoom = 12,
   sidebarWidth = 320,
@@ -90,7 +97,19 @@ export default function StoreLocatorMap({
   const [showFilters, setShowFilters] = useState(false)
 
   // Get all unique editais for filter dropdown
-  const allEditais = useMemo(() => getEditaisFromItems(items), [items])
+  const allEditais = useMemo(() => {
+    if (editais.length > 0) {
+      return editais.map(e => e.nome)
+    }
+    const editaisSet = new Set<string>()
+    items.forEach(item => {
+      if (item.editais && Array.isArray(item.editais)) {
+        item.editais.forEach(e => editaisSet.add(e))
+      }
+      if (item.edital) editaisSet.add(item.edital)
+    })
+    return Array.from(editaisSet).sort()
+  }, [items, editais])
 
   // Get all unique bairros
   const allBairros = useMemo(() => {
@@ -239,9 +258,11 @@ export default function StoreLocatorMap({
                   onChange={(e) => setFilterEdital(e.target.value)}
                   className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
                 >
-                  <option value="">Todos ({allEditais.length})</option>
-                  {allEditais.map(e => (
-                    <option key={e} value={e}>{e}</option>
+                  <option value="">Lista de Agentes Culturais Cadastrados</option>
+                  {editais.map((e, i) => (
+                    <option key={i} value={e.nome}>
+                      {e.nome} {e.ano} • {e.inscritos} inscritos • {e.contemplados} contemplados
+                    </option>
                   ))}
                 </select>
               </div>
