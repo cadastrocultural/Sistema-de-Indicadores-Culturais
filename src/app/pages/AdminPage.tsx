@@ -3250,10 +3250,9 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
     }
   }, [filtroEdital, stats.porEdital]);
 
-  import { ADMIN_PIN } from '../config/admin';
-
-  const adminPinEnv = ADMIN_PIN;
-  const adminPinRequired = true;
+  const ADMIN_PIN_ENV = import.meta.env.VITE_ADMIN_PIN;
+  const adminPinEnv = typeof ADMIN_PIN_ENV === 'string' ? ADMIN_PIN_ENV.trim() : '';
+  const adminPinRequired = adminPinEnv.length >= 4;
 
   if (!adminAuthed) {
     return (

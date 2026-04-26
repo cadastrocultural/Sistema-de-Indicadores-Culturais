@@ -1,1 +1,0 @@
-export const ADMIN_PIN = 'Bonete22';
