@@ -4,7 +4,7 @@ import { LocationOn, Search, Filter, Close } from '@mui/icons-material'
 
 interface CultureItem {
   id: string
-  tipo: 'agente' | 'grupo' | 'espaco' | 'edital'
+  tipo: 'agente' | 'grupo' | 'espaco' | 'projeto'
   nome: string
   bairro: string
   categoria: string
@@ -14,7 +14,7 @@ interface CultureItem {
   raca?: string
   valor?: number
   eh_contemplado?: boolean
-  edital?: string
+  editais?: string[]
   ano?: string
   proponente?: string
   [key: string]: any
@@ -32,14 +32,14 @@ const TIPO_COLORS: Record<string, string> = {
   agente: '#00A38C',
   grupo: '#0b57d0',
   espaco: '#FF6B35',
-  edital: '#8b5cf6',
+  projeto: '#8b5cf6',
 }
 
 const TIPO_EMOJI: Record<string, string> = {
   agente: '🎭',
   grupo: '👥',
   espaco: '🏛️',
-  edital: '📋',
+  projeto: '📋',
 }
 
 function formatBRL(value: number): string {
@@ -49,6 +49,29 @@ function formatBRL(value: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value)
+}
+
+// Get all unique editais from all items
+const getEditaisFromItems = (items: CultureItem[]): string[] => {
+  const editaisSet = new Set<string>()
+  items.forEach(item => {
+    if (item.editais && Array.isArray(item.editais)) {
+      item.editais.forEach(e => editaisSet.add(e))
+    }
+    if (item.edital) editaisSet.add(item.edital)
+  })
+  return Array.from(editaisSet).sort()
+}
+
+// Check if item participated in an edital
+const participatedInEdital = (item: CultureItem, editalName: string): boolean => {
+  if (item.editais && Array.isArray(item.editais)) {
+    return item.editais.some(e => e.toLowerCase().includes(editalName.toLowerCase()) || editalName.toLowerCase().includes(e.toLowerCase()))
+  }
+  if (item.edital) {
+    return item.edital.toLowerCase().includes(editalName.toLowerCase()) || editalName.toLowerCase().includes(item.edital.toLowerCase())
+  }
+  return false
 }
 
 export default function StoreLocatorMap({
@@ -66,55 +89,32 @@ export default function StoreLocatorMap({
   const [selectedItem, setSelectedItem] = useState<CultureItem | null>(null)
   const [showFilters, setShowFilters] = useState(false)
 
-  // DEDUPLICATION: Keep latest record per agent/group/space (by edital or name)
-  const deduplicatedItems = useMemo(() => {
-    const seen = new Map<string, CultureItem>()
-    
-    items.forEach(item => {
-      const key = `${item.tipo}-${item.nome}-${item.edital || ''}`
-      const existing = seen.get(key)
-      
-      // Keep the one with most data (prioritize items with lat/lng)
-      if (!existing) {
-        seen.set(key, item)
-      } else if (item.lat && item.lng && (!existing.lat || !existing.lng)) {
-        seen.set(key, item)
-      } else if (item.edital && item.edital !== existing.edital) {
-        // If different edital, keep the most recent (check by ano or order)
-        const itemYear = parseInt(item.ano || '0')
-        const existingYear = parseInt(existing.ano || '0')
-        if (itemYear >= existingYear) {
-          seen.set(key, item)
-        }
-      }
-    })
-    
-    return Array.from(seen.values())
+  // Get all unique editais for filter dropdown
+  const allEditais = useMemo(() => getEditaisFromItems(items), [items])
+
+  // Get all unique bairros
+  const allBairros = useMemo(() => {
+    const set = new Set(items.map(i => i.bairro).filter(b => b && b !== 'Não informado' && b !== 'não informado'))
+    return Array.from(set).sort()
   }, [items])
 
-  // Unique values for filters
-  const bairros = useMemo(() => {
-    const set = new Set(deduplicatedItems.map(i => i.bairro).filter(b => b && b !== 'Não informado' && b !== 'não informado'))
+  // Get all unique categorias
+  const allCategorias = useMemo(() => {
+    const set = new Set(items.map(i => i.categoria).filter(c => c))
     return Array.from(set).sort()
-  }, [deduplicatedItems])
+  }, [items])
 
-  const categorias = useMemo(() => {
-    const set = new Set(deduplicatedItems.map(i => i.categoria).filter(c => c))
-    return Array.from(set).sort()
-  }, [deduplicatedItems])
-
-  const editais = useMemo(() => {
-    const set = new Set(deduplicatedItems.map(i => i.edital).filter(e => e))
-    return Array.from(set).sort()
-  }, [deduplicatedItems])
-
-  const tipos = ['agente', 'grupo', 'espaco', 'edital']
+  // Get all unique tipos
+  const allTipos = ['agente', 'grupo', 'espaco'] as const
 
   // Statistics by neighborhood
   const estatisticasPorBairro = useMemo(() => {
     const stats: Record<string, { bairro: string; agente: number; grupo: number; espaco: number; total: number }> = {}
     
-    deduplicatedItems.forEach(item => {
+    items.forEach(item => {
+      if (filterTipo && item.tipo !== filterTipo) return
+      if (filterEdital && !participatedInEdital(item, filterEdital)) return
+      
       const b = item.bairro || 'Não informado'
       if (!stats[b]) stats[b] = { bairro: b, agente: 0, grupo: 0, espaco: 0, total: 0 }
       if (item.tipo === 'agente') stats[b].agente++
@@ -126,26 +126,28 @@ export default function StoreLocatorMap({
     return Object.values(stats)
       .filter(s => s.bairro !== 'Não informado')
       .sort((a, b) => b.total - a.total)
-  }, [deduplicatedItems])
+  }, [items, filterTipo, filterEdital])
 
-  // Filtered items
+  // Filtered items (show all agentes, grupos, espacos - projects are just for filtering)
   const filteredItems = useMemo(() => {
-    return deduplicatedItems.filter(item => {
+    return items.filter(item => {
+      // Only show agentes, grupos, espacos (not projects directly)
+      if (item.tipo === 'projeto') return false
+      
       const matchSearch = !searchTerm ||
         item.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.bairro?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.categoria?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.edital?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.proponente?.toLowerCase().includes(searchTerm.toLowerCase())
       
       const matchBairro = !filterBairro || item.bairro === filterBairro
       const matchCategoria = !filterCategoria || item.categoria === filterCategoria
       const matchTipo = !filterTipo || item.tipo === filterTipo
-      const matchEdital = !filterEdital || item.edital === filterEdital
+      const matchEdital = !filterEdital || participatedInEdital(item, filterEdital)
       
       return matchSearch && matchBairro && matchCategoria && matchTipo && matchEdital
     })
-  }, [deduplicatedItems, searchTerm, filterBairro, filterCategoria, filterTipo, filterEdital])
+  }, [items, searchTerm, filterBairro, filterCategoria, filterTipo, filterEdital])
 
   // Map points (only with coordinates)
   const mapPoints = useMemo(() => {
@@ -237,8 +239,8 @@ export default function StoreLocatorMap({
                   onChange={(e) => setFilterEdital(e.target.value)}
                   className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
                 >
-                  <option value="">Todos ({editais.length})</option>
-                  {editais.map(e => (
+                  <option value="">Todos ({allEditais.length})</option>
+                  {allEditais.map(e => (
                     <option key={e} value={e}>{e}</option>
                   ))}
                 </select>
@@ -252,8 +254,8 @@ export default function StoreLocatorMap({
                   onChange={(e) => setFilterBairro(e.target.value)}
                   className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
                 >
-                  <option value="">Todos ({bairros.length})</option>
-                  {bairros.map(b => (
+                  <option value="">Todos ({allBairros.length})</option>
+                  {allBairros.map(b => (
                     <option key={b} value={b}>{b}</option>
                   ))}
                 </select>
@@ -267,8 +269,8 @@ export default function StoreLocatorMap({
                   onChange={(e) => setFilterCategoria(e.target.value)}
                   className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
                 >
-                  <option value="">Todas ({categorias.length})</option>
-                  {categorias.map(c => (
+                  <option value="">Todas ({allCategorias.length})</option>
+                  {allCategorias.map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
@@ -291,7 +293,7 @@ export default function StoreLocatorMap({
         <div className="p-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-blue-50">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-slate-600">
-              {filteredItems.length} de {deduplicatedItems.length} registros
+              {filteredItems.length} de {items.length} registros
             </span>
             <span className="text-slate-400">{bairros.length} bairros</span>
           </div>
@@ -420,8 +422,8 @@ export default function StoreLocatorMap({
                     </div>
                     <div className="font-bold text-sm leading-tight mb-1">{item.nome}</div>
                     <div className="text-xs text-slate-500 mb-1">{item.bairro}</div>
-                    {item.edital && (
-                      <div className="text-[10px] text-purple-600 font-medium mb-1">{item.edital}</div>
+                    {item.editais && item.editais.length > 0 && (
+                      <div className="text-[10px] text-purple-600 font-medium mb-1">Edital: {item.editais[0]}</div>
                     )}
                     {item.proponente && (
                       <div className="text-xs text-slate-600 mb-1">Proponente: {item.proponente}</div>

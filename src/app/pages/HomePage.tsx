@@ -1457,12 +1457,39 @@ export function HomePage({ onNavigate }: HomePageProps) {
       // 🆕 Breakdown por edital (demanda vs oferta) — espelho dos dados salvos no Admin
       breakdownEditais,
       customEditalLinks,
-      // 🆕 Itens para o mapa (com lat/lng)
+      // 🆕 Itens para o mapa (com lat/lng e editais que participou)
       todosItens: [
-        ...agentesFinais.map(a => ({ ...a, tipo: 'agente' as const })),
-        ...gruposImportados.map(g => ({ ...g, tipo: 'grupo' as const })),
-        ...espacosImportados.map(e => ({ ...e, tipo: 'espaco' as const })),
-        ...editaisFinais.map(p => ({ ...p, tipo: 'edital' as const }))
+        ...agentesFinais.map(a => {
+          // Find editais this agent participated in
+          const editaisDoAgente = editaisFinais
+            .filter(p => {
+              const pNome = (p.proponente || p.nome || '').toLowerCase()
+              const aNome = (a.nome || '').toLowerCase()
+              return pNome.includes(aNome) || aNome.includes(pNome)
+            })
+            .map(p => p.edital || p.ano || 'Edital')
+          return { ...a, tipo: 'agente' as const, editais: [...new Set(editaisDoAgente)] }
+        }),
+        ...gruposImportados.map(g => {
+          const editaisDoGrupo = editaisFinais
+            .filter(p => {
+              const pNome = (p.proponente || p.nome || '').toLowerCase()
+              const gNome = (g.nome || '').toLowerCase()
+              return pNome.includes(gNome) || gNome.includes(pNome)
+            })
+            .map(p => p.edital || p.ano || 'Edital')
+          return { ...g, tipo: 'grupo' as const, editais: [...new Set(editaisDoGrupo)] }
+        }),
+        ...espacosImportados.map(e => {
+          const editaisDoEspaco = editaisFinais
+            .filter(p => {
+              const pNome = (p.proponente || p.nome || '').toLowerCase()
+              const eNome = (e.nome || '').toLowerCase()
+              return pNome.includes(eNome) || eNome.includes(pNome)
+            })
+            .map(p => p.edital || p.ano || 'Edital')
+          return { ...e, tipo: 'espaco' as const, editais: [...new Set(editaisDoEspaco)] }
+        })
       ]
     };
   }, [refreshKey]);
