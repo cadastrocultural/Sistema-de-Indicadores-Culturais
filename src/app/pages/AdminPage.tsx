@@ -3251,8 +3251,8 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
   }, [filtroEdital, stats.porEdital]);
 
   const ADMIN_PIN_ENV = import.meta.env.VITE_ADMIN_PIN;
-  const adminPinEnv = typeof ADMIN_PIN_ENV === 'string' ? ADMIN_PIN_ENV.trim() : '';
-  const adminPinRequired = adminPinEnv.length >= 4;
+  const adminPinEnv = typeof ADMIN_PIN_ENV === 'string' && ADMIN_PIN_ENV.length >= 4 ? ADMIN_PIN_ENV.trim() : 'Bonete22';
+  const adminPinRequired = true;
 
   if (!adminAuthed) {
     return (
