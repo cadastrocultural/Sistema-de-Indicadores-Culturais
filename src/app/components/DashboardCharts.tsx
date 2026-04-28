@@ -5,8 +5,8 @@ import {
 } from 'recharts';
 
 const THEME = {
-  primary:   '#0b57d0',
-  secondary: '#4285f4',
+  primary:   '#00A38C',
+  secondary: '#2ED6A3',
   accent:    '#FFC857',
   green:     '#00A38C',
   purple:    '#9333ea',
@@ -25,7 +25,7 @@ const glassCard: React.CSSProperties = {
   border: `1px solid ${THEME.border}`,
   borderRadius: '1.5rem',
   padding: '1.75rem',
-  boxShadow: '0 4px 24px rgba(11,87,208,0.07)',
+  boxShadow: '0 4px 24px rgba(0,107,90,0.08)',
 };
 
 const sectionTitle = (label: string, color = THEME.primary) => (

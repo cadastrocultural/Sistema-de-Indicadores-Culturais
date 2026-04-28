@@ -56,7 +56,7 @@ export function Timeline() {
           >
             {/* Dot */}
             <div className={`absolute -left-[41px] w-5 h-5 rounded-full border-4 border-white shadow-sm flex items-center justify-center ${
-              item.status === 'completed' ? 'bg-[#0b57d0]' : 
+              item.status === 'completed' ? 'bg-[#00A38C]' : 
               item.status === 'current' ? 'bg-[#FFC857] animate-pulse' : 'bg-gray-300'
             }`}>
               {item.status === 'completed' && <CheckCircle2 size={10} className="text-white" />}
@@ -64,7 +64,7 @@ export function Timeline() {
 
             <div className="flex flex-col md:flex-row md:items-baseline gap-2 md:gap-6">
               <span className={`text-sm font-black uppercase tracking-widest ${
-                item.status === 'completed' ? 'text-[#0b57d0]' : 
+                item.status === 'completed' ? 'text-[#00A38C]' : 
                 item.status === 'current' ? 'text-[#FFC857]' : 'text-gray-400'
               }`}>
                 {item.year}

@@ -22,7 +22,7 @@
       // 🌐 SALVA NO SERVIDOR
       console.log('🌐 [CLIENT] Enviando dados para o servidor...');
       
-      const { projectId, publicAnonKey } = await import('/utils/supabase/info');
+      const { projectId, publicAnonKey } = await import('../../lib/supabaseProjectInfo');
       const serverUrl = `https://${projectId}.supabase.co/functions/v1/make-server-2320c79f/save-data`;
       
       const response = await fetch(serverUrl, {

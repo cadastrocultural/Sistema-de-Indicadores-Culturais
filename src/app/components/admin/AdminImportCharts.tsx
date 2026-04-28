@@ -153,7 +153,7 @@ export function AdminImportCharts({ totalInscritos, contemplados, suplentes, nao
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start justify-between mb-1">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-[#0b57d0]">Distribuição</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[#00A38C]">Distribuição</p>
               <h4 className="text-sm font-bold text-slate-900">Inscritos por situação</h4>
             </div>
             <TaxaChip taxa={taxaAprovacao} />
@@ -204,7 +204,7 @@ export function AdminImportCharts({ totalInscritos, contemplados, suplentes, nao
 
         {/* Bar chart por edital */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[#0b57d0] mb-1">Por edital</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#00A38C] mb-1">Por edital</p>
           <h4 className="text-sm font-bold text-slate-900 mb-1">Inscritos vs. contemplados</h4>
           <div style={{ height: 270 }}>
             {barData.length > 0 ? (
@@ -248,7 +248,7 @@ export function AdminImportCharts({ totalInscritos, contemplados, suplentes, nao
       {/* Insights de tomada de decisão */}
       {insights.length > 0 && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[#0b57d0] mb-2">Insights para decisão</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#00A38C] mb-2">Insights para decisão</p>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {insights.map((ins, i) => (
               <InsightBanner key={i} {...ins} />

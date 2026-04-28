@@ -35,10 +35,10 @@ interface StoreLocatorMapProps {
 }
 
 const TIPO_COLORS: Record<string, string> = {
-  agente: '#00A38C',
-  grupo: '#0b57d0',
-  espaco: '#FF6B35',
-  projeto: '#8b5cf6',
+  agente: '#2ED6A3',
+  grupo: '#00A38C',
+  espaco: '#F2B84B',
+  projeto: '#101828',
 }
 
 const TIPO_EMOJI: Record<string, string> = {
@@ -93,6 +93,7 @@ export default function StoreLocatorMap({
   const [filterCategoria, setFilterCategoria] = useState('')
   const [filterTipo, setFilterTipo] = useState('')
   const [filterEdital, setFilterEdital] = useState('')
+  const [filterComunidade, setFilterComunidade] = useState('')
   const [selectedItem, setSelectedItem] = useState<CultureItem | null>(null)
   const [showFilters, setShowFilters] = useState(false)
 
@@ -123,50 +124,62 @@ export default function StoreLocatorMap({
     return Array.from(set).sort()
   }, [items])
 
+  const allComunidades = useMemo(() => {
+    const set = new Set(
+      items
+        .map(i => i.comunidadeTradicional || i.comunidade || i.povoTradicional)
+        .filter(c => c && c !== 'Não informado' && c !== 'não informado')
+    )
+    return Array.from(set).sort()
+  }, [items])
+
   // Get all unique tipos
-  const allTipos = ['agente', 'grupo', 'espaco'] as const
+  const allTipos = ['agente', 'grupo', 'espaco', 'projeto'] as const
 
   // Statistics by neighborhood
   const estatisticasPorBairro = useMemo(() => {
-    const stats: Record<string, { bairro: string; agente: number; grupo: number; espaco: number; total: number }> = {}
+    const stats: Record<string, { bairro: string; agente: number; grupo: number; espaco: number; projeto: number; total: number }> = {}
     
     items.forEach(item => {
       if (filterTipo && item.tipo !== filterTipo) return
       if (filterEdital && !participatedInEdital(item, filterEdital)) return
+      const comunidade = item.comunidadeTradicional || item.comunidade || item.povoTradicional || ''
+      if (filterComunidade && comunidade !== filterComunidade) return
       
       const b = item.bairro || 'Não informado'
-      if (!stats[b]) stats[b] = { bairro: b, agente: 0, grupo: 0, espaco: 0, total: 0 }
+      if (!stats[b]) stats[b] = { bairro: b, agente: 0, grupo: 0, espaco: 0, projeto: 0, total: 0 }
       if (item.tipo === 'agente') stats[b].agente++
       if (item.tipo === 'grupo') stats[b].grupo++
       if (item.tipo === 'espaco') stats[b].espaco++
+      if (item.tipo === 'projeto') stats[b].projeto++
       stats[b].total++
     })
     
     return Object.values(stats)
       .filter(s => s.bairro !== 'Não informado')
       .sort((a, b) => b.total - a.total)
-  }, [items, filterTipo, filterEdital])
+  }, [items, filterTipo, filterEdital, filterComunidade])
 
-  // Filtered items (show all agentes, grupos, espacos - projects are just for filtering)
+  // Filtered items: todos os cadastros e projetos entram no mapa.
   const filteredItems = useMemo(() => {
     return items.filter(item => {
-      // Only show agentes, grupos, espacos (not projects directly)
-      if (item.tipo === 'projeto') return false
-      
       const matchSearch = !searchTerm ||
         item.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.bairro?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.categoria?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.proponente?.toLowerCase().includes(searchTerm.toLowerCase())
+        item.proponente?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.comunidadeTradicional?.toLowerCase().includes(searchTerm.toLowerCase())
       
       const matchBairro = !filterBairro || item.bairro === filterBairro
       const matchCategoria = !filterCategoria || item.categoria === filterCategoria
       const matchTipo = !filterTipo || item.tipo === filterTipo
       const matchEdital = !filterEdital || participatedInEdital(item, filterEdital)
+      const comunidade = item.comunidadeTradicional || item.comunidade || item.povoTradicional || ''
+      const matchComunidade = !filterComunidade || comunidade === filterComunidade
       
-      return matchSearch && matchBairro && matchCategoria && matchTipo && matchEdital
+      return matchSearch && matchBairro && matchCategoria && matchTipo && matchEdital && matchComunidade
     })
-  }, [items, searchTerm, filterBairro, filterCategoria, filterTipo, filterEdital])
+  }, [items, searchTerm, filterBairro, filterCategoria, filterTipo, filterEdital, filterComunidade])
 
   // Map points (only with coordinates)
   const mapPoints = useMemo(() => {
@@ -184,22 +197,23 @@ export default function StoreLocatorMap({
     setFilterCategoria('')
     setFilterTipo('')
     setFilterEdital('')
+    setFilterComunidade('')
   }
 
-  const hasActiveFilters = searchTerm || filterBairro || filterCategoria || filterTipo || filterEdital
+  const hasActiveFilters = searchTerm || filterBairro || filterCategoria || filterTipo || filterEdital || filterComunidade
 
   return (
-    <div className="flex w-full h-full" style={{ minHeight: 500 }}>
+    <div className="flex h-full w-full bg-slate-100/90" style={{ minHeight: 500 }}>
       {/* SIDEBAR */}
       <div
-        className="flex flex-col bg-white border-r border-slate-200/90 overflow-hidden"
+        className="flex flex-col overflow-hidden border-r border-slate-200/90 bg-white"
         style={{
           width: sidebarWidth,
           minWidth: sidebarWidth,
         }}
       >
         {/* Search */}
-        <div className="p-4 border-b border-slate-100">
+        <div className="border-b border-slate-100 p-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" sx={{ fontSize: 18 }} />
             <input
@@ -207,23 +221,23 @@ export default function StoreLocatorMap({
               placeholder="Buscar nome, edital, categoria…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none transition-colors"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50/80 py-2.5 pl-9 pr-4 text-sm transition-colors focus:border-teal-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-teal-500/20"
             />
           </div>
           
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`mt-3 w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-semibold transition-all ${
+            className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-all ${
               showFilters || hasActiveFilters
-                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'border border-teal-200 bg-teal-50 text-teal-900'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200/80'
             }`}
           >
             <Filter sx={{ fontSize: 16 }} />
             Filtros
             {hasActiveFilters && (
-              <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">
-                {[filterBairro, filterCategoria, filterTipo, filterEdital].filter(Boolean).length}
+              <span className="ml-1 rounded-md bg-slate-800 px-1.5 py-0.5 font-mono text-xs font-medium text-white tabular-nums">
+                {[filterBairro, filterCategoria, filterTipo, filterEdital, filterComunidade].filter(Boolean).length}
               </span>
             )}
           </button>
@@ -231,15 +245,15 @@ export default function StoreLocatorMap({
 
         {/* Filters Panel */}
         {showFilters && (
-          <div className="p-4 border-b border-slate-100 bg-slate-50 max-h-[300px] overflow-y-auto">
+          <div className="max-h-[340px] overflow-y-auto border-b border-slate-100 bg-slate-50/90 p-4">
             <div className="space-y-3">
               {/* Tipo */}
               <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Tipo</label>
+                <label className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-slate-500">Tipo</label>
                 <select
                   value={filterTipo}
                   onChange={(e) => setFilterTipo(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500/15"
                 >
                   <option value="">Todos</option>
                   {allTipos.map(t => (
@@ -252,11 +266,11 @@ export default function StoreLocatorMap({
               
               {/* Edital */}
               <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Edital</label>
+                <label className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-slate-500">Edital</label>
                 <select
                   value={filterEdital}
                   onChange={(e) => setFilterEdital(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500/15"
                 >
                   <option value="">Lista de Agentes Culturais Cadastrados</option>
                   {editais.map((e, i) => (
@@ -269,11 +283,11 @@ export default function StoreLocatorMap({
               
               {/* Bairro */}
               <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Bairro</label>
+                <label className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-slate-500">Bairro</label>
                 <select
                   value={filterBairro}
                   onChange={(e) => setFilterBairro(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500/15"
                 >
                   <option value="">Todos ({allBairros.length})</option>
                   {allBairros.map(b => (
@@ -284,14 +298,28 @@ export default function StoreLocatorMap({
               
               {/* Categoria */}
               <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Categoria</label>
+                <label className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-slate-500">Categoria</label>
                 <select
                   value={filterCategoria}
                   onChange={(e) => setFilterCategoria(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none"
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500/15"
                 >
                   <option value="">Todas ({allCategorias.length})</option>
                   {allCategorias.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Comunidade tradicional</label>
+                <select
+                  value={filterComunidade}
+                  onChange={(e) => setFilterComunidade(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 text-sm rounded-lg border border-emerald-100 bg-white focus:border-[#2ED6A3] focus:outline-none"
+                >
+                  <option value="">Todas ({allComunidades.length})</option>
+                  {allComunidades.map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
@@ -311,12 +339,17 @@ export default function StoreLocatorMap({
         )}
 
         {/* Stats Summary */}
-        <div className="p-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-blue-50">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-600">
-              {filteredItems.length} de {items.length} registros
+        <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 to-teal-50/40 px-3 py-2.5">
+          <div className="flex items-center justify-between text-[0.7rem]">
+            <span className="font-medium text-slate-700">
+              <span className="font-mono font-semibold tabular-nums text-slate-900">{filteredItems.length}</span>
+              <span className="text-slate-500"> / </span>
+              <span className="font-mono tabular-nums text-slate-600">{items.length}</span>
+              <span className="ml-1 text-slate-500">registros</span>
             </span>
-            <span className="text-slate-400">{allBairros.length} bairros</span>
+            <span className="font-mono text-slate-500 tabular-nums">
+              {allBairros.length} <span className="font-sans font-medium">bairros</span>
+            </span>
           </div>
         </div>
 
@@ -332,8 +365,8 @@ export default function StoreLocatorMap({
               <div
                 key={`${item.tipo}-${item.id}-${i}`}
                 onClick={() => handleItemClick(item)}
-                className={`p-3 border-b border-slate-100 cursor-pointer transition-all hover:bg-blue-50 ${
-                  selectedItem?.id === item.id ? 'bg-blue-50 border-l-4 border-l-blue-600' : ''
+                className={`cursor-pointer border-b border-slate-100 p-3 transition-all hover:bg-slate-50 ${
+                  selectedItem?.id === item.id ? 'border-l-[3px] border-l-teal-600 bg-teal-50/60' : 'border-l-[3px] border-l-transparent'
                 }`}
               >
                 <div className="flex items-start gap-2">
@@ -347,7 +380,10 @@ export default function StoreLocatorMap({
                     <div className="font-semibold text-sm text-slate-800 truncate">{item.nome}</div>
                     <div className="text-xs text-slate-500 mt-0.5">{item.categoria}</div>
                     {item.edital && (
-                      <div className="text-[10px] text-purple-600 font-medium truncate">{item.edital}</div>
+                      <div className="text-[10px] text-emerald-700 font-medium truncate">{item.edital}</div>
+                    )}
+                    {item.comunidadeTradicional && (
+                      <div className="text-[10px] text-[#B9801F] font-bold truncate">Comunidade: {item.comunidadeTradicional}</div>
                     )}
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] font-bold text-slate-400 uppercase">{item.bairro}</span>
@@ -368,7 +404,7 @@ export default function StoreLocatorMap({
         </div>
 
         {/* Bairro Stats */}
-        <div className="p-3 border-t border-slate-200 bg-slate-50">
+        <div className="p-3 border-t border-emerald-100 bg-[#F6FBF7]">
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">
             Top Bairros ({estatisticasPorBairro.length})
           </div>
@@ -383,13 +419,18 @@ export default function StoreLocatorMap({
                     </span>
                   )}
                   {stat.grupo > 0 && (
-                    <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700">
+                    <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-[#006B5A]">
                       {stat.grupo}
                     </span>
                   )}
                   {stat.espaco > 0 && (
-                    <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-orange-100 text-orange-700">
+                    <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-700">
                       {stat.espaco}
+                    </span>
+                  )}
+                  {stat.projeto > 0 && (
+                    <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-slate-900 text-white">
+                      {stat.projeto}
                     </span>
                   )}
                 </div>
@@ -449,12 +490,15 @@ export default function StoreLocatorMap({
                     {item.proponente && (
                       <div className="text-xs text-slate-600 mb-1">Proponente: {item.proponente}</div>
                     )}
+                    {item.comunidadeTradicional && (
+                      <div className="text-[10px] font-bold text-amber-700 mb-1">Comunidade tradicional: {item.comunidadeTradicional}</div>
+                    )}
                     {item.tipo === 'projeto' && item.valor && (
                       <div className="text-sm font-black text-emerald-600">{formatBRL(item.valor)}</div>
                     )}
                     <button
                       onClick={() => handleItemClick(item)}
-                      className="mt-2 text-xs text-blue-600 hover:underline"
+                      className="mt-2 text-xs text-[#006B5A] hover:underline"
                     >
                       Ver detalhes →
                     </button>
@@ -466,7 +510,7 @@ export default function StoreLocatorMap({
         </MapContainer>
 
         {/* Map Legend */}
-        <div className="absolute bottom-4 left-4 p-3 rounded-xl bg-white/95 backdrop-blur-sm shadow-lg z-[1000]">
+        <div className="absolute bottom-4 left-4 p-3 rounded-xl bg-white/95 backdrop-blur-sm shadow-lg z-[1000] border border-emerald-100">
           <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wide mb-2">Legenda</div>
           <div className="space-y-1.5">
             {Object.entries(TIPO_EMOJI).map(([tipo, emoji]) => (
@@ -496,7 +540,7 @@ export default function StoreLocatorMap({
             <div className="font-bold text-sm mb-1">{selectedItem.nome}</div>
             <div className="text-xs text-slate-500 mb-2">{selectedItem.categoria} • {selectedItem.bairro}</div>
             {selectedItem.edital && (
-              <div className="text-xs text-purple-600 font-medium mb-1">{selectedItem.edital}</div>
+              <div className="text-xs text-emerald-700 font-medium mb-1">{selectedItem.edital}</div>
             )}
             {selectedItem.proponente && (
               <div className="text-xs text-slate-600 mb-1">Proponente: {selectedItem.proponente}</div>
@@ -506,6 +550,9 @@ export default function StoreLocatorMap({
             )}
             {selectedItem.raca && (
               <div className="text-xs text-slate-600">Raça: {selectedItem.raca}</div>
+            )}
+            {selectedItem.comunidadeTradicional && (
+              <div className="text-xs font-bold text-amber-700">Comunidade: {selectedItem.comunidadeTradicional}</div>
             )}
             {selectedItem.tipo === 'edital' && selectedItem.valor && (
               <div className="text-sm font-black text-emerald-600 mt-1">{formatBRL(selectedItem.valor)}</div>

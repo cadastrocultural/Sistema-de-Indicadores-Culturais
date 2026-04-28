@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useId } from 'react';
+import React, { useMemo, useState, useEffect, useId, useCallback, useRef } from 'react';
 import { motion } from 'motion/react';
 import { 
   TrendingUp, Users, MapPin, Calendar, ArrowRight, 
@@ -19,26 +19,30 @@ import {
   computeDemandaOfertaPorEdital,
   getEditalNomeExibicaoProjeto,
   getProjetoValorNormalizado,
-  isProjetoContemplado,
+  isProjetoContempladoParaEstatistica,
   normalizeProjetosOnParsed,
+  OFFICIAL_ALDIR_BLANC_2020_VALUES,
   normalizeFullPersonNameForRanking,
-  pickRicherCadastroPayload,
+  withOfficialAldirBlanc2020Context,
 } from './admin/projetosDemandaOferta';
-import { computeEstatisticasPublicas } from '../data/estatisticas-publicas';
+import { buildCadastroUnionRows, computeEstatisticasPublicas } from '../data/estatisticas-publicas';
 import { IlhabelaTerritoryMap } from '../components/maps/IlhabelaTerritoryMap';
 import StoreLocatorMap from '../components/maps/StoreLocatorMap';
 import { InciclePanel } from '../components/dashboard/InciclePanel';
 import { resolveComunidadeTradicional } from './admin/comunidadeTradicionalUtils';
 
 import { parseBRLValue } from '../data/editais-data';
-import { MAPEAMENTO_2020 } from '../data/mapeamento-data';
 import { DADOS_ESTATICOS } from '../data/dados-estaticos';
 import { canonicalBairroIlhabela, getBairroCoords, looksLikeEnderecoCompleto } from '../data/bairros-coords';
 import { Timeline } from '../components/Timeline';
 import { AdminImportCharts } from '../components/admin/AdminImportCharts';
 import { HomeDiversityCharts, type DiversityChartsPayload } from '../components/HomeDiversityCharts';
-import { findFieldValue } from '../utils/dashboardDiversityFields';
-import { HERO_BACKGROUND_VIDEO_URLS } from '../data/hero-videos';
+import {
+  extractPcdColumnValue as extractPcdColumnValueShared,
+  findFieldValue,
+  isPcdDeclaracaoPositiva as isPcdDeclaracaoPositivaShared,
+} from '../utils/dashboardDiversityFields';
+import { loadHeroBackgroundVideoUrls } from '../data/hero-videos';
 
 // Helper: adiciona IDs únicos a arrays de dados para evitar warnings de keys duplicadas no Recharts
 const addUniqueIds = <T extends Record<string, any>>(arr: T[], prefix = 'item'): T[] => {
@@ -51,10 +55,10 @@ interface HomePageProps {
 
 // Cores do Cadastro Cultural de Ilhabela - ATUALIZADO (Azul Institucional / Ocean)
 const CORES_CADASTRO = {
-  principal: '#0b57d0',     // Azul Google / Material
-  secundario: '#4285f4',    // Azul claro
+  principal: '#00A38C',
+  secundario: '#2ED6A3',
   destaque: '#FFC857',      // Amarelo (Mantido para contraste)
-  aldir: '#E30613',         // Vermelho Aldir Blanc (Mantido pois é da Lei)
+  aldir: '#00A38C',         // Verde institucional da paleta atual
   lpg: '#db2777',           // Rosa LPG (Mantido)
   azul: '#1e40af',          // Azul escuro
   cinza: '#5f5f6a'
@@ -192,48 +196,6 @@ function normalizeKeyCadastro(v: unknown): string {
     .trim();
 }
 
-/** Chave CPF/CNPJ ou nome+bairro — alinhada a `DashboardPage` (mapeamento). */
-function cadastroChavePainel(row: any): string {
-  const cpf = String(row?.cpf || row?.cpf_cnpj || row?.cnpj || '').replace(/\D/g, '');
-  const nome = normalizeKeyCadastro(row?.nome || row?.Nome || '');
-  const bairro = normalizeKeyCadastro(row?.bairro || row?.Bairro || '');
-  return cpf ? `cpf:${cpf}` : `nome:${nome}|bairro:${bairro}`;
-}
-
-function dedupeMapeamentoRows(rows: any[]): any[] {
-  const seen = new Set<string>();
-  return rows.filter((a: any) => {
-    const key = cadastroChavePainel(a);
-    if (!key || key === 'nome:|bairro:') return true;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-/**
- * Mapeamento 2020 (ou `parsed.mapeamento`) + agentes/grupos/espaços importados,
- * sem contar duas vezes a mesma pessoa/entidade (chave igual ao painel).
- */
-function countCadastroUnion(mapeamentoBase: any[], agentes: any[], grupos: any[], espacos: any[]): number {
-  const mapRows = dedupeMapeamentoRows(mapeamentoBase);
-  const used = new Set<string>();
-  for (const a of mapRows) {
-    const key = cadastroChavePainel(a);
-    if (key && key !== 'nome:|bairro:') used.add(key);
-  }
-  let extra = 0;
-  for (const r of [...agentes, ...grupos, ...espacos]) {
-    const key = cadastroChavePainel(r);
-    if (key && key !== 'nome:|bairro:') {
-      if (used.has(key)) continue;
-      used.add(key);
-    }
-    extra += 1;
-  }
-  return mapRows.length + extra;
-}
-
 /** Preenche anos sem contemplados com 0 para o eixo X não “pular” anos. */
 function fillYearGaps(rows: { ano: string; valor: number }[]): { ano: string; valor: number }[] {
   if (rows.length === 0) return rows;
@@ -334,15 +296,15 @@ function DashboardSectionHeader({
   description: string;
 }) {
   return (
-    <div className="mb-6 flex max-w-4xl gap-4 rounded-3xl border border-white/70 bg-white/60 p-4 shadow-[0_12px_40px_-24px_rgba(15,23,42,0.28)] backdrop-blur-sm md:mb-8 md:gap-5 md:p-5">
+    <div className="mb-6 flex max-w-4xl gap-4 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.06),0_16px_40px_-28px_rgba(15,23,42,0.12)] md:mb-8 md:gap-5 md:p-5">
       <div
-        className="hidden w-1 shrink-0 rounded-full bg-gradient-to-b from-[#0b57d0] via-sky-500/80 to-slate-300/50 sm:block sm:min-h-[4.75rem]"
+        className="hidden w-1 shrink-0 rounded-full bg-gradient-to-b from-teal-600 via-slate-400 to-slate-200 sm:block sm:min-h-[4.75rem]"
         aria-hidden
       />
       <div className="min-w-0">
-        <p className="ds-dash-kicker mb-2 inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-[#0b57d0]">{kicker}</p>
+        <p className="ds-dash-kicker mb-2 inline-flex rounded-md border border-teal-100 bg-teal-50/90 px-2.5 py-1 text-teal-800">{kicker}</p>
         <h2 className="ds-dash-section-title mb-2">{title}</h2>
-        <p className="text-sm font-medium leading-relaxed text-slate-600 md:text-[0.95rem]">{description}</p>
+        <p className="text-sm font-normal leading-relaxed text-slate-600 md:text-[0.9375rem]">{description}</p>
       </div>
     </div>
   );
@@ -401,8 +363,8 @@ function KpiMetricCard({
           {chipLabel}
         </span>
       </div>
-      {/* Value */}
-      <div className="flex-1" style={{ color: '#ffffff', minWidth: 0 }}>
+      {/* Value — monoespaçado herdado nos filhos (KPIs grandes) */}
+      <div className="flex-1 text-white [&_p]:m-0 [&_p]:font-mono [&_p]:font-semibold [&_p]:tabular-nums [&_p]:tracking-tight" style={{ minWidth: 0 }}>
         {value}
       </div>
       {/* Subtitle */}
@@ -452,8 +414,31 @@ export function HomePage({ onNavigate }: HomePageProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [heroVideoIndex, setHeroVideoIndex] = useState(0);
+  const [activeHeroSlot, setActiveHeroSlot] = useState(0);
+  const [heroSlotSources, setHeroSlotSources] = useState<[string, string]>(['', '']);
+  const [failedHeroVideos, setFailedHeroVideos] = useState<Set<string>>(() => new Set());
+  const heroVideoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+  const [heroVideoBaseUrls, setHeroVideoBaseUrls] = useState<string[]>([]);
+  const [serverPayload, setServerPayload] = useState<Record<string, any> | null>(null);
+  /** Evita mostrar o fallback estático (~76 linhas) antes do `load-data` quando não há cache local. */
+  const [remoteDataAttemptDone, setRemoteDataAttemptDone] = useState(false);
+  const availableHeroVideos = useMemo(
+    () => heroVideoBaseUrls.filter((url) => !failedHeroVideos.has(url)),
+    [heroVideoBaseUrls, failedHeroVideos]
+  );
+  const heroVideosKey = useMemo(() => availableHeroVideos.join('|'), [availableHeroVideos]);
 
   
+  useEffect(() => {
+    let cancelled = false;
+    void loadHeroBackgroundVideoUrls().then((urls) => {
+      if (!cancelled) setHeroVideoBaseUrls(urls);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     setIsMounted(true);
     
@@ -487,17 +472,72 @@ export function HomePage({ onNavigate }: HomePageProps) {
   }, []);
 
   useEffect(() => {
-    if (HERO_BACKGROUND_VIDEO_URLS.length > 0 && heroVideoIndex >= HERO_BACKGROUND_VIDEO_URLS.length) {
+    if (availableHeroVideos.length > 0 && heroVideoIndex >= availableHeroVideos.length) {
       setHeroVideoIndex(0);
     }
-  }, [heroVideoIndex]);
+  }, [availableHeroVideos.length, heroVideoIndex]);
+
+  useEffect(() => {
+    if (availableHeroVideos.length === 0) {
+      setHeroSlotSources(['', '']);
+      return;
+    }
+
+    setHeroVideoIndex(0);
+    setActiveHeroSlot(0);
+    setHeroSlotSources([
+      availableHeroVideos[0],
+      availableHeroVideos.length > 1 ? availableHeroVideos[1] : availableHeroVideos[0],
+    ]);
+  }, [heroVideosKey, availableHeroVideos]);
+
+  const playHeroVideoSlot = useCallback((slot: number) => {
+    window.requestAnimationFrame(() => {
+      const video = heroVideoRefs.current[slot];
+      if (!video) return;
+      video.currentTime = video.ended ? 0 : video.currentTime;
+      const playPromise = video.play();
+      if (playPromise) playPromise.catch(() => undefined);
+    });
+  }, []);
+
+  const advanceHeroVideo = useCallback(() => {
+    if (availableHeroVideos.length === 0) return;
+
+    if (availableHeroVideos.length === 1) {
+      const video = heroVideoRefs.current[activeHeroSlot];
+      if (video) {
+        video.currentTime = 0;
+        const playPromise = video.play();
+        if (playPromise) playPromise.catch(() => undefined);
+      }
+      return;
+    }
+
+    const nextIndex = (heroVideoIndex + 1) % availableHeroVideos.length;
+    const nextSlot = activeHeroSlot === 0 ? 1 : 0;
+    const slotToPreload = activeHeroSlot;
+    const followingIndex = (nextIndex + 1) % availableHeroVideos.length;
+
+    setHeroVideoIndex(nextIndex);
+    setActiveHeroSlot(nextSlot);
+    playHeroVideoSlot(nextSlot);
+
+    window.setTimeout(() => {
+      setHeroSlotSources((prev) => {
+        const next: [string, string] = [...prev] as [string, string];
+        next[slotToPreload] = availableHeroVideos[followingIndex];
+        return next;
+      });
+    }, 120);
+  }, [activeHeroSlot, availableHeroVideos, heroVideoIndex, playHeroVideoSlot]);
 
   // Mesma fonte do Dashboard/Admin: servidor primeiro, depois cache no localStorage
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { projectId, publicAnonKey } = await import('/utils/supabase/info');
+        const { projectId, publicAnonKey } = await import('../../lib/supabaseProjectInfo');
         const response = await fetch(
           `https://${projectId}.supabase.co/functions/v1/make-server-2320c79f/load-data`,
           {
@@ -512,15 +552,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
         const result = await response.json();
         if (result?.success && result.data && !cancelled) {
           const normalized = normalizeProjetosOnParsed(result.data) as Record<string, any>;
-          let merged: Record<string, unknown> = normalized;
+          setServerPayload(normalized);
           try {
-            const loc = localStorage.getItem('editais_imported_data');
-            if (loc) merged = pickRicherCadastroPayload(normalized, JSON.parse(loc)) as Record<string, unknown>;
-          } catch {
-            /* mantém servidor */
-          }
-          try {
-            localStorage.setItem('editais_imported_data', JSON.stringify(merged));
+            localStorage.setItem('editais_imported_data', JSON.stringify(normalized));
           } catch {
             /* quota ou modo privado restrito */
           }
@@ -528,6 +562,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
         }
       } catch {
         /* offline ou função indisponível — permanece o que já estiver no localStorage */
+      } finally {
+        if (!cancelled) setRemoteDataAttemptDone(true);
       }
     })();
     return () => {
@@ -535,9 +571,16 @@ export function HomePage({ onNavigate }: HomePageProps) {
     };
   }, []);
 
+  /**
+   * KPIs do hero e mapa: aguardam o primeiro `load-data` (sucesso ou falha no `finally`).
+   * Se dependêssemos só da ausência de localStorage, um cache antigo/parcial mostrava totais errados
+   * (ex.: ~76) e depois saltava para os dados do servidor (~965).
+   */
+  const showCadastroLoadingShell = isMounted && !remoteDataAttemptDone;
+
   const resumoGlobal = useMemo(() => {
     // Carrega dados importados do localStorage
-    const loadedData = localStorage.getItem('editais_imported_data');
+    const loadedData = serverPayload ? '' : localStorage.getItem('editais_imported_data');
     let parsed: Record<string, any> | null = null;
     let agentesImportados: any[] = [];
     let gruposImportados: any[] = [];
@@ -548,7 +591,21 @@ export function HomePage({ onNavigate }: HomePageProps) {
     let editalResumoOverrides: Record<string, unknown> = {};
     let demandaOfertaExcluidosHome: string[] = [];
     
-    if (loadedData) {
+    if (serverPayload) {
+      parsed = normalizeProjetosOnParsed(serverPayload) as Record<string, any>;
+      agentesImportados = parsed.agentes || [];
+      gruposImportados = parsed.grupos || [];
+      espacosImportados = parsed.espacos || [];
+      editaisImportados = (parsed.projetos || []) as any[];
+      if (parsed.customEditalLinks && typeof parsed.customEditalLinks === 'object') {
+        customEditalLinks = parsed.customEditalLinks;
+      }
+      editalResumoOverrides = parsed.editalResumoOverrides || {};
+      demandaOfertaExcluidosHome = Array.isArray(parsed.demandaOfertaExcluidosHome)
+        ? parsed.demandaOfertaExcluidosHome.filter((x: unknown) => typeof x === 'string')
+        : [];
+      usandoDadosReais = editaisImportados.length > 0;
+    } else if (loadedData) {
       try {
         parsed = normalizeProjetosOnParsed(JSON.parse(loadedData)) as Record<string, any>;
         agentesImportados = parsed.agentes || [];
@@ -578,7 +635,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
           console.log('✅ AGENTES IMPORTADOS ENCONTRADOS:', agentesImportados.length);
           console.log('📋 Amostra (primeiros 3):', agentesImportados.slice(0, 3));
         } else {
-          console.warn('⚠️ NENHUM AGENTE IMPORTADO! Usando dados estáticos (MAPEAMENTO_2020)');
+          console.warn('⚠️ NENHUM AGENTE IMPORTADO! Usando dados estáticos embutidos.');
         }
         
         if (editaisImportados.length > 0) {
@@ -600,18 +657,19 @@ export function HomePage({ onNavigate }: HomePageProps) {
     const totalGrupos = gruposImportados.length;
     const totalEspacos = espacosImportados.length;
 
-    // Mesma prioridade do Dashboard: `mapeamento` no payload; senão base exportada (localStorage no build).
-    const baseMapeamento =
-      parsed && Array.isArray(parsed.mapeamento) && parsed.mapeamento.length > 0
-        ? parsed.mapeamento
-        : MAPEAMENTO_2020;
+    /** Planilha “Mapeamento” no Admin; senão base WordPress embutida (DADOS_ESTATICOS.mapeamento). */
+    let mForUnion =
+      parsed && Array.isArray(parsed.mapeamento) && parsed.mapeamento.length > 0 ? parsed.mapeamento : [];
+    if (
+      mForUnion.length === 0 &&
+      Array.isArray(DADOS_ESTATICOS.mapeamento) &&
+      DADOS_ESTATICOS.mapeamento.length > 0
+    ) {
+      mForUnion = DADOS_ESTATICOS.mapeamento as any[];
+    }
 
-    const inscricoesTotais = countCadastroUnion(
-      baseMapeamento,
-      agentesImportados,
-      gruposImportados,
-      espacosImportados,
-    );
+    const unionCadastro = buildCadastroUnionRows(mForUnion, agentesFinais, gruposImportados, espacosImportados);
+    const inscricoesTotais = unionCadastro.length;
     
     /** Mesma lógica do painel Admin: edital+ano, overrides e exclusões da vitrine "Demanda vs Oferta". */
     const porEditalAll = computeDemandaOfertaPorEdital(editaisFinais, editalResumoOverrides as any);
@@ -626,6 +684,30 @@ export function HomePage({ onNavigate }: HomePageProps) {
         valor: r.valorInvestido,
       }));
 
+    const upsertOfficialAldir2020 = (
+      tipo: 'agentes' | 'grupos' | 'espacos',
+      sourceRows: any[],
+      matcher: (text: string) => boolean
+    ) => {
+      const official = OFFICIAL_ALDIR_BLANC_2020_VALUES[tipo];
+      if (!sourceRows.length && !breakdownEditais.some((ed) => matcher(normalizeLooseKey(`${ed.nome} ${ed.chave}`)))) return;
+      const existing = breakdownEditais.find((ed) => matcher(normalizeLooseKey(`${ed.nome} ${ed.chave}`)));
+      const row = {
+        chave: official.chave,
+        nome: official.nome,
+        ano: String(official.ano),
+        inscritos: existing?.inscritos && existing.inscritos > 0 ? existing.inscritos : sourceRows.length || official.contemplados,
+        contemplados: official.contemplados,
+        valor: official.valorInvestido,
+      };
+      if (existing) Object.assign(existing, row);
+      else breakdownEditais.push(row);
+    };
+
+    upsertOfficialAldir2020('agentes', agentesFinais, (text) => text.includes('agentes culturais') || text.includes('premiacao de agentes'));
+    upsertOfficialAldir2020('grupos', gruposImportados, (text) => text.includes('grupos') || text.includes('coletivos'));
+    upsertOfficialAldir2020('espacos', espacosImportados, (text) => text.includes('espacos') || text.includes('espaco cultural'));
+
     /** Anos presentes na base (editais + cadastro/mapeamento) — sem intervalo fixo inventado. */
     const anosCadastroSet = new Set<number>();
     for (const r of porEditalAll) {
@@ -636,7 +718,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       const y = Number((p as any)._anoOrigem ?? (p as any).ano ?? (p as any).Ano ?? 0);
       if (Number.isFinite(y) && y >= 1990 && y <= 2100) anosCadastroSet.add(y);
     }
-    for (const row of [...agentesImportados, ...gruposImportados, ...espacosImportados, ...baseMapeamento]) {
+    for (const row of unionCadastro.map((u) => u.row)) {
       const y = Number((row as any).ano);
       if (Number.isFinite(y) && y >= 1990 && y <= 2100) anosCadastroSet.add(y);
     }
@@ -868,13 +950,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
     
     // 🎯 Indicadores de diversidade com a MESMA base da página inicial:
     // apenas cadastros culturais (agentes + grupos + espaços), sem somar linhas de projetos/editais.
-    const mapRowsParaDiversidade = Array.isArray(baseMapeamento) ? baseMapeamento : [];
-    const todosParaDiversidade = [
-      ...mapRowsParaDiversidade,
-      ...agentesFinais,
-      ...gruposImportados,
-      ...espacosImportados,
-    ];
+    const todosParaDiversidade = unionCadastro.map((u) => u.row);
     const baseParaPercentual = todosParaDiversidade.length || 1;
     
     /** Mesma regra do Admin: só conta com nome oficial em COMUNIDADES_TRADICIONAIS (evita "Sim" genérico ou a palavra "comunidade" em títulos). */
@@ -1131,7 +1207,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       return false;
     }).length;
     
-    const pcd = todosParaDiversidade.filter((a: any) => isPcdDeclaracaoPositiva(extractPcdColumnValue(a))).length;
+    const pcd = todosParaDiversidade.filter((a: any) => isPcdDeclaracaoPositivaShared(extractPcdColumnValueShared(a))).length;
 
     const bump = (m: Map<string, number>, k: string, n = 1) => m.set(k, (m.get(k) || 0) + n);
     const mapToArr = (m: Map<string, number>, max = 12) =>
@@ -1301,9 +1377,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
         bump(racaMap, racaBucket(a));
         bump(idadeMap, idadeFaixaBucket(a));
 
-        const rawPcd = extractPcdColumnValue(a);
+        const rawPcd = extractPcdColumnValueShared(a);
         if (!String(rawPcd || '').trim()) bump(pcdMap, 'Não informado');
-        else if (isPcdDeclaracaoPositiva(rawPcd)) bump(pcdMap, 'Declara PcD');
+        else if (isPcdDeclaracaoPositivaShared(rawPcd)) bump(pcdMap, 'Declara PcD');
         else {
           const v = normalizeLooseKey(rawPcd);
           if (
@@ -1439,7 +1515,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
         const povo = detectPovoReferencia(a);
         if (povo) bump(povosMap, povo);
 
-        if (isPcdDeclaracaoPositiva(String(rawPcd || ''))) {
+        if (isPcdDeclaracaoPositivaShared(String(rawPcd || ''))) {
           const tipoPcd = pcdTipoDetalhadoFromRow(a) || tipoPcdFromRaw(String(rawPcd));
           if (tipoPcd) bump(pcdTipoMap, tipoPcd);
         }
@@ -1597,24 +1673,123 @@ export function HomePage({ onNavigate }: HomePageProps) {
     const totalValorFinal = breakdownEditais.reduce((a, e) => a + e.valor, 0);
 
     const totaisPublicos = computeEstatisticasPublicas({
-      agentes: agentesImportados,
-      grupos: gruposImportados,
-      espacos: espacosImportados,
+      agentes: agentesFinais.map((row) => withOfficialAldirBlanc2020Context(row, 'agentes')),
+      grupos: gruposImportados.map((row) => withOfficialAldirBlanc2020Context(row, 'grupos')),
+      espacos: espacosImportados.map((row) => withOfficialAldirBlanc2020Context(row, 'espacos')),
       projetos: editaisImportados,
-      mapeamento: baseMapeamento,
+      mapeamento: mForUnion,
     });
+    const totaisPublicosAjustados = {
+      ...totaisPublicos,
+      totalContemplados: totalContempladosFinal,
+      totalValorInvestido: totalValorFinal,
+      totalEditais: breakdownEditais.length,
+    };
     
     // Adiciona IDs únicos para cada edital (previne warnings de keys duplicadas no React/Recharts)
     breakdownEditais.forEach((ed, idx) => {
       (ed as any).id = `${ed.nome}-${idx}`;
     });
+
+    const mapCoordsForRow = (row: any) => {
+      const end = String(
+        row?.enderecoCompleto ||
+          row?.['Endereço completo'] ||
+          row?.['Endereco completo'] ||
+          row?.endereco ||
+          row?.Endereço ||
+          ''
+      ).trim();
+      const bairroRaw = String(
+        row?.bairro ||
+          row?.Bairro ||
+          row?.localidade ||
+          row?.Localidade ||
+          row?.comunidade ||
+          row?.Comunidade ||
+          ''
+      ).trim();
+      const bairro = canonicalBairroIlhabela(bairroRaw, end).replace(/\s+/g, ' ').trim() || bairroRaw || 'Não informado';
+      const directLat = Number(row?.lat ?? row?.latitude ?? row?.Latitude);
+      const directLng = Number(row?.lng ?? row?.longitude ?? row?.Longitude);
+      if (Number.isFinite(directLat) && Number.isFinite(directLng)) return { bairro, lat: directLat, lng: directLng };
+      const coords = getBairroCoords(bairro);
+      return { bairro, lat: coords?.lat, lng: coords?.lng };
+    };
+
+    const comunidadeTradicionalForMap = (row: any, includeNomeProjeto = false) => {
+      const rawField = findFieldValue(
+        row,
+        'comunidadeTradicional',
+        'comunidade_tradicional',
+        'comunidade tradicional',
+        'povo_tradicional',
+        'povos tradicionais',
+        'Comunidade Tradicional',
+      );
+      const { eh, nome } = resolveComunidadeTradicional({
+        rawField,
+        bairro: String(row?.bairro || row?.Bairro || ''),
+        endereco: String(row?.enderecoCompleto || row?.endereco || row?.Endereço || ''),
+        extras: includeNomeProjeto ? [String(row?.nome || row?.nomeProjeto || row?.projeto || row?.titulo || '')] : [],
+      });
+      return eh ? nome : '';
+    };
+
+    const cadastroMapItem = (row: any, tipo: 'agente' | 'grupo' | 'espaco', idx: number) => {
+      const coords = mapCoordsForRow(row);
+      const nome = String(row?.nome || row?.Nome || row?.razao_social || row?.RazãoSocial || 'Sem nome').trim();
+      const editaisDoCadastro = editaisFinais
+        .filter((p) => {
+          const pNome = String(p.proponente || p.nome || p.Nome || '').toLowerCase();
+          const cNome = nome.toLowerCase();
+          return pNome && cNome && (pNome.includes(cNome) || cNome.includes(pNome));
+        })
+        .map((p) => getEditalNomeExibicaoProjeto(p));
+      return {
+        ...row,
+        id: `${tipo}-${idx}`,
+        tipo,
+        nome,
+        proponente: nome,
+        bairro: coords.bairro,
+        lat: coords.lat,
+        lng: coords.lng,
+        categoria: row?.categoria || row?.Categoria || (tipo === 'grupo' ? 'Grupos e coletivos' : tipo === 'espaco' ? 'Espaços culturais' : 'Agentes culturais'),
+        comunidadeTradicional: comunidadeTradicionalForMap(row),
+        editais: [...new Set(editaisDoCadastro)],
+      };
+    };
+
+    const projetoMapItem = (row: any, idx: number) => {
+      const coords = mapCoordsForRow(row);
+      const nomeProjeto = String(row?.nomeProjeto || row?.projeto || row?.Projeto || row?.titulo || row?.Título || row?.nome || 'Projeto sem nome').trim();
+      const proponente = String(row?.proponente || row?.nomeProponente || row?.responsavel || row?.nome || '').trim();
+      const contemplado = isProjetoContempladoParaEstatistica(row);
+      return {
+        ...row,
+        id: `projeto-${idx}`,
+        tipo: 'projeto' as const,
+        nome: nomeProjeto,
+        proponente,
+        bairro: coords.bairro,
+        lat: coords.lat,
+        lng: coords.lng,
+        categoria: row?.categoria || row?.Categoria || row?.areaAtuacao || row?.linguagem || 'Projeto cultural',
+        comunidadeTradicional: comunidadeTradicionalForMap(row, true),
+        edital: getEditalNomeExibicaoProjeto(row),
+        editais: [getEditalNomeExibicaoProjeto(row)],
+        eh_contemplado: contemplado,
+        valor: contemplado ? getProjetoValorNormalizado(row) : 0,
+      };
+    };
     
     return {
       totalProjetos: totalContempladosFinal,
       totalInscritos: totalInscritosFinal,
       totalValor: totalValorFinal,
       totalValorBrl: formatBRL(totalValorFinal),
-      totaisPublicos,
+      totaisPublicos: totaisPublicosAjustados,
       qtdEditais: breakdownEditais.length,
       trad,
       percTrad,
@@ -1641,40 +1816,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
       customEditalLinks,
       // 🆕 Itens para o mapa (com lat/lng e editais que participou)
       todosItens: [
-        ...agentesFinais.map(a => {
-          // Find editais this agent participated in
-          const editaisDoAgente = editaisFinais
-            .filter(p => {
-              const pNome = (p.proponente || p.nome || '').toLowerCase()
-              const aNome = (a.nome || '').toLowerCase()
-              return pNome.includes(aNome) || aNome.includes(pNome)
-            })
-            .map(p => p.edital || p.ano || 'Edital')
-          return { ...a, tipo: 'agente' as const, editais: [...new Set(editaisDoAgente)] }
-        }),
-        ...gruposImportados.map(g => {
-          const editaisDoGrupo = editaisFinais
-            .filter(p => {
-              const pNome = (p.proponente || p.nome || '').toLowerCase()
-              const gNome = (g.nome || '').toLowerCase()
-              return pNome.includes(gNome) || gNome.includes(pNome)
-            })
-            .map(p => p.edital || p.ano || 'Edital')
-          return { ...g, tipo: 'grupo' as const, editais: [...new Set(editaisDoGrupo)] }
-        }),
-        ...espacosImportados.map(e => {
-          const editaisDoEspaco = editaisFinais
-            .filter(p => {
-              const pNome = (p.proponente || p.nome || '').toLowerCase()
-              const eNome = (e.nome || '').toLowerCase()
-              return pNome.includes(eNome) || eNome.includes(pNome)
-            })
-            .map(p => p.edital || p.ano || 'Edital')
-          return { ...e, tipo: 'espaco' as const, editais: [...new Set(editaisDoEspaco)] }
-        })
+        ...unionCadastro.map((u, idx) => cadastroMapItem(u.row, u.tipo, idx)),
+        ...editaisFinais
+          .filter((p) => isProjetoContempladoParaEstatistica(p))
+          .map((p, idx) => projetoMapItem(p, idx)),
       ]
     };
-  }, [refreshKey]);
+  }, [refreshKey, serverPayload]);
 
   // 🆕 CALCULA AUTOMATICAMENTE DISTRIBUIÇÃO POR BAIRRO (para o gráfico "Distribuição Geográfica")
   const distribuicaoPorBairro = useMemo(() => {
@@ -1801,9 +1949,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
         .sort((a, b) => parseInt(a.ano, 10) - parseInt(b.ano, 10));
     };
 
-    const raw = localStorage.getItem('editais_imported_data');
     try {
-      const parsed = raw
+      const raw = serverPayload ? '' : localStorage.getItem('editais_imported_data');
+      const parsed = serverPayload
+        ? (normalizeProjetosOnParsed(serverPayload) as Record<string, any>)
+        : raw
         ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
         : (DADOS_ESTATICOS as unknown as Record<string, any>);
       const rawProjetos = (parsed.projetos || []) as any[];
@@ -1812,9 +1962,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
         ? parsed.mapeamento
         : (DADOS_ESTATICOS.mapeamento as any[]);
       const cadastrosComValor = [
-        ...(parsed.agentes || []),
-        ...(parsed.grupos || []),
-        ...(parsed.espacos || []),
+        ...((parsed.agentes || []) as any[]).map((row) => withOfficialAldirBlanc2020Context(row, 'agentes')),
+        ...((parsed.grupos || []) as any[]).map((row) => withOfficialAldirBlanc2020Context(row, 'grupos')),
+        ...((parsed.espacos || []) as any[]).map((row) => withOfficialAldirBlanc2020Context(row, 'espacos')),
         ...mapeamento2020,
       ];
       if (projetos.length === 0 && cadastrosComValor.length === 0) return [];
@@ -1829,26 +1979,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
         return ano;
       };
 
-      const getValorRegistro = (p: any) =>
-        getProjetoValorNormalizado(p) ||
-        parseBRLValue(
-          p.valor ||
-            p.Valor ||
-            p.value ||
-            p['Valor (R$)'] ||
-            p.valor_aprovado ||
-            p.valorAprovado ||
-            p.valor_contemplado ||
-            p.valorContemplado ||
-            p.premio ||
-            p.prêmio ||
-            p['Prêmio'] ||
-            0
-        );
+      const getValorRegistro = (p: any) => getProjetoValorNormalizado(p);
 
       projetos.forEach((p: any) => {
         const valor = getValorRegistro(p);
-        const isContemp = isProjetoContemplado(p) || p.eh_contemplado === true || p.eh_contemplado === 'true' || valor > 0;
+        const isContemp = isProjetoContempladoParaEstatistica(p);
         if (!isContemp || valor <= 0) return;
         const ano = getAnoRegistro(p);
         if (!ano || ano < 1990) return;
@@ -1872,12 +2007,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
     } catch {
       return fallbackFromBreakdown();
     }
-  }, [refreshKey, resumoGlobal.breakdownEditais]);
+  }, [refreshKey, resumoGlobal.breakdownEditais, serverPayload]);
 
   const categoriasCharts = useMemo(() => {
-    const raw = localStorage.getItem('editais_imported_data');
     try {
-      const parsed = raw
+      const raw = serverPayload ? '' : localStorage.getItem('editais_imported_data');
+      const parsed = serverPayload
+        ? (normalizeProjetosOnParsed(serverPayload) as Record<string, any>)
+        : raw
         ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
         : (DADOS_ESTATICOS as unknown as Record<string, any>);
       const rawProjetos = (parsed.projetos || []) as any[];
@@ -1903,13 +2040,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
           if (looksLikeNoise) return;
           categories.push('Outros');
         }
-        const st = (p.status || p.Status || '').toLowerCase();
-        const isContemp =
-          st.includes('contemplado') ||
-          st.includes('aprovado') ||
-          st.includes('classificado') ||
-          st.includes('selecionado');
-        const valorProjeto = isContemp ? parseBRLValue(p.valor || p.Valor || p.value || 0) : 0;
+        const isContemp = isProjetoContempladoParaEstatistica(p);
+        const valorProjeto = isContemp ? getProjetoValorNormalizado(p) : 0;
         for (const cat of categories) {
           const current = catMap.get(cat) || { qtd: 0, valor: 0 };
           current.qtd += 1;
@@ -1925,7 +2057,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
     } catch {
       return [];
     }
-  }, [refreshKey]);
+  }, [refreshKey, serverPayload]);
 
   // 🔧 Dados memoizados com IDs únicos para evitar warnings de keys duplicadas no Recharts
   const evolucaoComIds = useMemo(() => {
@@ -2037,18 +2169,20 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
     if (!rows.length) {
       try {
-        const raw = localStorage.getItem('editais_imported_data');
-        const parsed = raw
-          ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
-          : (DADOS_ESTATICOS as unknown as Record<string, any>);
+        const raw = serverPayload ? '' : localStorage.getItem('editais_imported_data');
+        const parsed = serverPayload
+          ? (normalizeProjetosOnParsed(serverPayload) as Record<string, any>)
+          : raw
+            ? (normalizeProjetosOnParsed(JSON.parse(raw)) as Record<string, any>)
+            : (DADOS_ESTATICOS as unknown as Record<string, any>);
         const projetos = Array.isArray(parsed.projetos) && parsed.projetos.length > 0
           ? parsed.projetos
           : (DADOS_ESTATICOS.projetos as any[]);
         const cadastros = [
           ...(Array.isArray(parsed.mapeamento) ? parsed.mapeamento : []),
-          ...(Array.isArray(parsed.agentes) ? parsed.agentes : []),
-          ...(Array.isArray(parsed.grupos) ? parsed.grupos : []),
-          ...(Array.isArray(parsed.espacos) ? parsed.espacos : []),
+          ...(Array.isArray(parsed.agentes) ? parsed.agentes.map((row: any) => withOfficialAldirBlanc2020Context(row, 'agentes')) : []),
+          ...(Array.isArray(parsed.grupos) ? parsed.grupos.map((row: any) => withOfficialAldirBlanc2020Context(row, 'grupos')) : []),
+          ...(Array.isArray(parsed.espacos) ? parsed.espacos.map((row: any) => withOfficialAldirBlanc2020Context(row, 'espacos')) : []),
         ];
 
         const byEdital = new Map<string, number>();
@@ -2059,28 +2193,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
         projetos.forEach((p: any) => {
           const valor = getProjetoValorNormalizado(p);
-          if ((isProjetoContemplado(p) || valor > 0) && valor > 0) {
+          if (isProjetoContempladoParaEstatistica(p) && valor > 0) {
             addValor(getEditalNomeExibicaoProjeto(p), valor);
           }
         });
 
         cadastros.forEach((row: any) => {
-          const valor =
-            getProjetoValorNormalizado(row) ||
-            parseBRLValue(
-              row.valor ||
-                row.Valor ||
-                row.value ||
-                row['Valor (R$)'] ||
-                row.valor_aprovado ||
-                row.valorAprovado ||
-                row.valor_contemplado ||
-                row.valorContemplado ||
-                row.premio ||
-                row.prêmio ||
-                row['Prêmio'] ||
-                0
-            );
+          const valor = getProjetoValorNormalizado(row);
           if (valor <= 0) return;
           const nome = String(
             row._editalOrigem ||
@@ -2122,7 +2241,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       out.push({ name: 'Demais editais', value: rest, _id: 'vp-rest' });
     }
     return out.filter((x) => x.value > 0);
-  }, [resumoGlobal.breakdownEditais]);
+  }, [resumoGlobal.breakdownEditais, serverPayload]);
 
   const aldirBlancEditais = useMemo(() => {
     const rows = resumoGlobal.breakdownEditais || [];
@@ -2177,29 +2296,48 @@ export function HomePage({ onNavigate }: HomePageProps) {
   if (!isMounted) return <div className="min-h-screen ds-dash-page" />;
 
   return (
-    <div className="ds-dash-page min-h-screen pb-20 font-sans text-[#1b1b1f]">
+    <div className="ds-dash-page min-h-screen pb-20 font-sans text-[#1b1b1f] antialiased">
       {/* Hero — painel executivo */}
       <section className="relative overflow-hidden border-b border-slate-800/40">
-        {HERO_BACKGROUND_VIDEO_URLS.length > 0 && (
-          <video
-            key={HERO_BACKGROUND_VIDEO_URLS[heroVideoIndex]}
-            className="absolute inset-0 z-0 h-full w-full object-cover opacity-45"
-            src={HERO_BACKGROUND_VIDEO_URLS[heroVideoIndex]}
-            autoPlay
-            muted
-            playsInline
-            preload="metadata"
-            onEnded={() => setHeroVideoIndex((idx) => (idx + 1) % HERO_BACKGROUND_VIDEO_URLS.length)}
-            onError={() => setHeroVideoIndex((idx) => (idx + 1) % HERO_BACKGROUND_VIDEO_URLS.length)}
-            aria-hidden
-          />
-        )}
+        {availableHeroVideos.length > 0 && heroSlotSources.map((source, slot) => (
+          source ? (
+            <video
+              key={`${slot}-${source}`}
+              ref={(node) => {
+                heroVideoRefs.current[slot] = node;
+              }}
+              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-75 ${
+                activeHeroSlot === slot ? 'z-0 opacity-95' : '-z-10 opacity-0'
+              }`}
+              src={source}
+              autoPlay={activeHeroSlot === slot}
+              muted
+              loop={availableHeroVideos.length === 1}
+              playsInline
+              preload={activeHeroSlot === slot ? 'metadata' : 'none'}
+              onCanPlay={(event) => {
+                if (activeHeroSlot !== slot) return;
+                const video = event.currentTarget;
+                const playPromise = video.play();
+                if (playPromise) playPromise.catch(() => undefined);
+              }}
+              onEnded={() => {
+                if (activeHeroSlot === slot) advanceHeroVideo();
+              }}
+              onError={() => {
+                setFailedHeroVideos((prev) => new Set(prev).add(source));
+                if (activeHeroSlot === slot) advanceHeroVideo();
+              }}
+              aria-hidden
+            />
+          ) : null
+        ))}
         <div
-          className="absolute inset-0 z-[1] bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent),linear-gradient(165deg,rgba(7,11,20,0.96)_0%,rgba(15,23,42,0.86)_45%,rgba(12,26,51,0.94)_100%)]"
+          className="absolute inset-0 z-[1] bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(0,163,140,0.18),transparent),linear-gradient(165deg,rgba(7,11,20,0.46)_0%,rgba(15,23,42,0.34)_48%,rgba(12,26,51,0.50)_100%)]"
           aria-hidden
         />
 
-        <div className="absolute inset-0 z-[2] bg-slate-950/20" aria-hidden />
+        <div className="absolute inset-0 z-[2] bg-slate-950/0" aria-hidden />
 
         <div
           className="pointer-events-none absolute inset-0 z-[3] opacity-[0.06]"
@@ -2211,33 +2349,33 @@ export function HomePage({ onNavigate }: HomePageProps) {
           aria-hidden
         />
 
-        <div className="container relative z-10 mx-auto px-4 pb-14 pt-10 sm:px-6 md:pb-16 md:pt-14 lg:pb-20 lg:pt-16">
+        <div className="container relative z-10 mx-auto px-4 pb-5 pt-4 sm:px-6 md:pb-6 md:pt-5 lg:pb-7 lg:pt-6">
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-            className="max-w-4xl"
+            className="max-w-5xl"
           >
-            <div className="mb-4 inline-flex flex-wrap items-center gap-2 rounded-full border border-white/15 bg-white/[0.07] px-3.5 py-1.5 text-[0.68rem] font-bold uppercase tracking-[0.14em] text-slate-200 backdrop-blur-md sm:text-[0.72rem]">
-              <ShieldCheck size={15} className="shrink-0 text-sky-300" aria-hidden />
-              <span className="text-slate-100/95">SMIIC</span>
-              <span className="hidden text-white/25 sm:inline" aria-hidden>
+            <div className="mb-3 inline-flex flex-wrap items-center gap-2 rounded-lg border border-white/12 bg-slate-950/35 px-3 py-1.5 font-mono text-[0.58rem] font-medium uppercase tracking-[0.16em] text-slate-200/95 backdrop-blur-md sm:text-[0.62rem]">
+              <ShieldCheck size={14} className="shrink-0 text-teal-300" aria-hidden />
+              <span>SMIIC</span>
+              <span className="hidden text-white/30 sm:inline" aria-hidden>
                 ·
               </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <MapPin size={14} className="shrink-0 text-sky-300/90" aria-hidden />
-                Município de Ilhabela · Secretaria de Cultura
+              <span className="flex items-center gap-1.5 font-sans font-semibold normal-case tracking-normal text-slate-300">
+                <MapPin size={13} className="shrink-0 text-teal-300/90" aria-hidden />
+                Ilhabela · Cultura
               </span>
             </div>
 
-            <h1 className="max-w-3xl text-[2rem] font-black leading-[1.05] tracking-[-0.045em] text-white sm:text-4xl md:text-5xl lg:text-[3.25rem]">
+            <h1 className="max-w-3xl text-balance text-[1.65rem] font-bold leading-[1.08] tracking-[-0.035em] text-white sm:text-2xl md:text-3xl lg:text-[2.15rem]">
               Painel de Indicadores Culturais
             </h1>
-            <p className="mt-4 max-w-2xl text-sm font-semibold leading-relaxed text-sky-100/90 sm:text-base md:text-lg">
-              Dados municipais em mapas, gráficos e indicadores para acompanhar o território cultural de Ilhabela com transparência.
+            <p className="mt-2.5 max-w-2xl text-[0.8125rem] font-normal leading-relaxed text-slate-300 sm:text-sm">
+              Base municipal integrada: mapas, séries e KPIs para leitura do território cultural com rastreabilidade e transparência.
             </p>
 
-            <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Button
                 onClick={() => onNavigate('painel')}
                 variant="contained"
@@ -2246,14 +2384,15 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   width: { xs: '100%', sm: 'auto' },
                   bgcolor: '#ffffff',
                   color: '#0f172a',
-                  fontWeight: 800,
-                  borderRadius: '14px',
+                  fontWeight: 600,
+                  borderRadius: '10px',
                   textTransform: 'none',
                   px: 3.5,
-                  py: 1.35,
-                  fontSize: '0.92rem',
-                  boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
-                  '&:hover': { bgcolor: '#f1f5f9', transform: 'translateY(-1px)' },
+                  py: 0.9,
+                  fontSize: '0.8125rem',
+                  letterSpacing: '-0.01em',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                  '&:hover': { bgcolor: '#f8fafc', transform: 'translateY(-1px)' },
                 }}
                 endIcon={<ArrowRight />}
               >
@@ -2266,20 +2405,20 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 sx={{
                   width: { xs: '100%', sm: 'auto' },
                   color: '#e2e8f0',
-                  borderColor: 'rgba(255,255,255,0.28)',
-                  bgcolor: 'rgba(255,255,255,0.04)',
-                  backdropFilter: 'blur(10px)',
-                  fontWeight: 700,
-                  borderRadius: '14px',
+                  borderColor: 'rgba(255,255,255,0.22)',
+                  bgcolor: 'rgba(15,23,42,0.35)',
+                  backdropFilter: 'blur(12px)',
+                  fontWeight: 600,
+                  borderRadius: '10px',
                   textTransform: 'none',
                   px: 3.5,
-                  py: 1.35,
-                  fontSize: '0.92rem',
-                  borderWidth: '1.5px',
+                  py: 0.9,
+                  fontSize: '0.8125rem',
+                  borderWidth: '1px',
                   '&:hover': {
-                    borderColor: 'rgba(255,255,255,0.45)',
-                    bgcolor: 'rgba(255,255,255,0.1)',
-                    borderWidth: '1.5px',
+                    borderColor: 'rgba(255,255,255,0.38)',
+                    bgcolor: 'rgba(15,23,42,0.45)',
+                    borderWidth: '1px',
                   },
                 }}
                 endIcon={<FileText />}
@@ -2288,15 +2427,31 @@ export function HomePage({ onNavigate }: HomePageProps) {
               </Button>
             </div>
 
-            <div className="mt-8 grid max-w-3xl grid-cols-1 gap-3 text-white sm:grid-cols-3">
+            <div className="mt-4 grid max-w-3xl grid-cols-1 gap-2.5 sm:grid-cols-3">
               {[
-                { label: 'Território', value: `${resumoGlobal.todosItens.length.toLocaleString('pt-BR')} registros mapeados` },
-                { label: 'Editais', value: `${resumoGlobal.totaisPublicos.totalEditais || resumoGlobal.breakdownEditais.length} bases consolidadas` },
-                { label: 'Investimento', value: formatBRL(resumoGlobal.totaisPublicos.totalValorInvestido) },
+                {
+                  label: 'Território',
+                  value: showCadastroLoadingShell
+                    ? 'Carregando dados…'
+                    : `${(resumoGlobal.totaisPublicos.totalInscritos || resumoGlobal.inscricoesTotais || resumoGlobal.todosItens.length).toLocaleString('pt-BR')} registros consolidados`,
+                },
+                {
+                  label: 'Editais',
+                  value: showCadastroLoadingShell
+                    ? 'Carregando dados…'
+                    : `${resumoGlobal.totaisPublicos.totalEditais || resumoGlobal.breakdownEditais.length} bases consolidadas`,
+                },
+                {
+                  label: 'Investimento',
+                  value: showCadastroLoadingShell ? 'Carregando dados…' : formatBRL(resumoGlobal.totaisPublicos.totalValorInvestido),
+                },
               ].map((item) => (
-                <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur-md">
-                  <p className="text-[0.62rem] font-black uppercase tracking-[0.16em] text-sky-200/80">{item.label}</p>
-                  <p className="mt-1 text-sm font-extrabold leading-snug text-white">{item.value}</p>
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-white/10 border-l-teal-400/90 bg-slate-950/40 p-3 backdrop-blur-md"
+                >
+                  <p className="text-[0.58rem] font-semibold uppercase tracking-[0.14em] text-teal-200/85">{item.label}</p>
+                  <p className="ds-metric-value mt-1.5 text-[0.8125rem] leading-snug text-white sm:text-[0.875rem]">{item.value}</p>
                 </div>
               ))}
             </div>
@@ -2305,23 +2460,34 @@ export function HomePage({ onNavigate }: HomePageProps) {
       </section>
 
       {/* MAPA STORE LOCATOR - Demo */}
-      <section className="container relative z-20 mx-auto -mt-7 mb-10 max-w-7xl px-4 sm:px-6 md:-mt-9 md:mb-12">
-        <div className="overflow-hidden rounded-3xl ring-1 ring-slate-900/[0.04]" style={{ boxShadow: '0 20px 60px -30px rgba(15,23,42,0.32), 0 4px 24px -8px rgba(15,23,42,0.10)' }}>
-          <div className="border-b border-slate-100 bg-white px-5 py-4 md:px-8 md:py-5">
+      <section className="container relative z-20 mx-auto -mt-4 mb-8 max-w-7xl px-4 sm:px-6 md:-mt-5 md:mb-10">
+        <div
+          className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white ring-1 ring-slate-900/[0.03]"
+          style={{ boxShadow: '0 20px 56px -32px rgba(15,23,42,0.18), 0 4px 20px -8px rgba(15,23,42,0.08)' }}
+        >
+          <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50/50 to-white px-5 py-4 md:px-8 md:py-5">
             <div className="mb-1 flex items-center gap-2">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#00A38C]" />
-              <p className="ds-dash-kicker text-[#00A38C]">Mapa interativo</p>
+              <span className="inline-block h-2 w-2 rounded-sm bg-teal-600 shadow-sm shadow-teal-600/30" />
+              <p className="ds-dash-kicker text-teal-800">Exploração geográfica</p>
             </div>
-            <h2 className="text-lg font-extrabold tracking-tight text-slate-900 md:text-xl">
+            <h2 className="text-lg font-bold tracking-tight text-slate-900 md:text-xl">
               Agentes culturais no território
             </h2>
-            <p className="mt-1 max-w-3xl text-xs font-medium leading-relaxed text-slate-500 sm:text-sm">
-              Pesquise e filtre agentes por bairro, categoria ou tipo. Visualize a distribuição no mapa.
+            <p className="mt-1 max-w-3xl text-xs font-normal leading-relaxed text-slate-600 sm:text-sm">
+              Consulta dinâmica por bairro, categoria, tipo e edital. Pontos agregados refletem a base deduplicada importada no painel.
             </p>
           </div>
-          <div className="h-[360px] bg-slate-50 sm:h-[430px] lg:h-[520px]">
-            <StoreLocatorMap 
-              items={resumoGlobal.todosItens}
+          <div className="relative h-[300px] bg-slate-50 sm:h-[340px] lg:h-[390px]">
+            {showCadastroLoadingShell && (
+              <div className="absolute inset-0 z-[500] flex flex-col items-center justify-center gap-2 bg-white/90 px-4 text-center">
+                <p className="text-sm font-extrabold text-slate-700">Carregando cadastro cultural…</p>
+                <p className="max-w-md text-xs font-medium text-slate-500">
+                  Sincronizando com o servidor. Em seguida os totais e o mapa refletem a base completa.
+                </p>
+              </div>
+            )}
+            <StoreLocatorMap
+              items={showCadastroLoadingShell ? [] : resumoGlobal.todosItens}
               editais={resumoGlobal.breakdownEditais}
               center={[-23.82, -45.36]}
               zoom={12}
@@ -2332,27 +2498,30 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
       {/* KPIs + gráficos principais — logo no início */}
       <section className="container relative z-20 mx-auto mb-12 max-w-7xl px-4 sm:px-6 md:mb-14">
-        <div className="ds-dash-panel overflow-hidden rounded-2xl ring-1 ring-slate-900/[0.04] md:rounded-3xl" style={{ boxShadow: '0 4px 24px -8px rgba(15,23,42,0.10), 0 1px 3px rgba(15,23,42,0.06)' }}>
-          <div className="border-b border-slate-100 bg-white px-5 py-4 md:px-8 md:py-5">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#0b57d0]" />
-              <p className="ds-dash-kicker text-[#0b57d0]">Painel público</p>
+        <div
+          className="ds-dash-panel overflow-hidden rounded-2xl border border-slate-200/70 md:rounded-2xl"
+          style={{ boxShadow: '0 4px 24px -8px rgba(15,23,42,0.08), 0 1px 3px rgba(15,23,42,0.05)' }}
+        >
+          <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50/40 to-white px-5 py-4 md:px-8 md:py-5">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-sm bg-teal-600 shadow-sm shadow-teal-600/25" />
+              <p className="ds-dash-kicker text-teal-800">Síntese quantitativa</p>
             </div>
-            <h2 className="text-lg font-extrabold tracking-tight text-slate-900 md:text-xl">
+            <h2 className="text-lg font-bold tracking-tight text-slate-900 md:text-xl">
               Indicadores e análise gráfica
             </h2>
-            <p className="mt-1 max-w-3xl text-xs font-medium leading-relaxed text-slate-500 sm:text-sm">
-              Cadastro no mapa de totais = apenas mapeamento cultural (deduplicado). Editais seguem o breakdown do Admin.
+            <p className="mt-1 max-w-3xl text-xs font-normal leading-relaxed text-slate-600 sm:text-sm">
+              Cadastro no território = mesma união deduplicada do mapa (mapeamento + agentes, grupos e espaços). Editais seguem o breakdown do Admin.
             </p>
           </div>
-          <div className="bg-[#f8fafc] p-4 sm:p-5 md:p-7">
+          <div className="bg-slate-50/80 p-4 sm:p-5 md:p-7">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-12 lg:gap-4">
             <motion.div className="min-w-0 xl:col-span-2" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05, duration: 0.4, ease: [0.22,1,0.36,1] }}>
               <KpiMetricCard
                 borderColor="#1a56db"
                 icon={<Users size={18} strokeWidth={2.5} />}
-                chipLabel="Mapeamento"
-                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.agentes, resumoGlobal.totalAgentes)}</p>}
+                chipLabel="Mapeamento 2020"
+                value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.agentes}</p>}
                 subtitle="Agentes cadastrados no mapeamento cultural"
               />
             </motion.div>
@@ -2361,7 +2530,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
               <KpiMetricCard
                 borderColor="#0f766e"
                 icon={<Award size={18} strokeWidth={2.5} />}
-                chipLabel="Mapeamento"
+                chipLabel="Mapeamento 2020"
                 value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.grupos, resumoGlobal.totalGrupos)}</p>}
                 subtitle="Grupos e coletivos cadastrados"
               />
@@ -2371,7 +2540,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
               <KpiMetricCard
                 borderColor="#4338ca"
                 icon={<Building2 size={18} strokeWidth={2.5} />}
-                chipLabel="Mapeamento"
+                chipLabel="Mapeamento 2020"
                 value={<p className="m-0 text-4xl sm:text-5xl font-black tabular-nums tracking-tight leading-none text-white">{Math.max(resumoGlobal.totaisPublicos.cadastroPorTipoMapeamento.espacos, resumoGlobal.totalEspacos)}</p>}
                 subtitle="Espaços culturais cadastrados"
               />
@@ -2449,7 +2618,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
             <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5">
               <Card key="card-evolucao-line-lead" sx={{ ...chartCardSx, minWidth: 0, overflow: 'hidden' }}>
                 <CardContent className="p-4 md:p-5">
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0]">Investimento</p>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#00A38C]">Investimento</p>
                   <h3 className="mb-0.5 text-sm font-bold text-[#0f172a] md:text-base">Evolução do investimento</h3>
                   <p className="mb-3 text-[11px] text-slate-500">Valores contemplados por ano</p>
                   <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT}>
@@ -2502,7 +2671,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
               <Card key="card-breakdown-bar-lead" sx={{ ...chartCardSx, minWidth: 0, overflow: 'hidden' }}>
                 <CardContent className="p-4 md:p-5">
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0]">Editais</p>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#00A38C]">Editais</p>
                   <h3 className="mb-0.5 text-sm font-bold text-[#0f172a] md:text-base">Contemplados por edital</h3>
                   <p className="mb-2 text-[11px] text-slate-500">Projetos aprovados · valor investido (R$)</p>
                   <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT}>
@@ -2592,7 +2761,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
               <Card key="card-categoria-bar-lead" sx={{ ...chartCardSx, minWidth: 0, overflow: 'hidden' }}>
                 <CardContent className="p-4 md:p-5">
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0]">Linguagens</p>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#00A38C]">Linguagens</p>
                   <h3 className="mb-0.5 text-sm font-bold text-[#0f172a] md:text-base">Por categoria</h3>
                   <p className="mb-3 text-[11px] text-slate-500">Volume de projetos</p>
                   <ResponsiveContainer width="100%" height={LEAD_CHART_HEIGHT}>
@@ -2783,11 +2952,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
               suplentes: 0,
             }))}
           />
-
+          
           <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card sx={chartCardSx}>
               <CardContent className="p-4 md:p-5">
-                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0b57d0]">Participação</p>
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#00A38C]">Participação</p>
                 <h3 className="mb-0.5 text-sm font-black text-slate-900 md:text-base">Inscritos x contemplados</h3>
                 <p className="mb-3 text-[11px] font-medium text-slate-500">Comparação direta por edital.</p>
                 <ResponsiveContainer width="100%" height={260}>
@@ -2825,7 +2994,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
             <Card sx={chartCardSx}>
               <CardContent className="p-4 md:p-5">
-                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-blue-600">Orçamento</p>
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#00A38C]">Orçamento</p>
                 <h3 className="mb-0.5 text-sm font-black text-slate-900 md:text-base">Valor investido</h3>
                 <p className="mb-3 text-[11px] font-medium text-slate-500">Recursos contemplados por edital.</p>
                 <ResponsiveContainer width="100%" height={260}>
@@ -2834,7 +3003,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     <XAxis dataKey="nomeCurto" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }} interval={0} angle={-18} textAnchor="end" height={78} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={formatCompactBRL} width={70} />
                     <RechartsTooltip contentStyle={chartTooltipContentStyle} formatter={(value: number) => formatBRL(value)} labelFormatter={(_, payload) => String(payload?.[0]?.payload?.nome || '')} />
-                    <Bar dataKey="valor" name="Valor investido" fill="#0b57d0" radius={[9, 9, 0, 0]} maxBarSize={42}>
+                    <Bar dataKey="valor" name="Valor investido" fill="#00A38C" radius={[9, 9, 0, 0]} maxBarSize={42}>
                       <LabelList dataKey="valor" position="top" formatter={(value: unknown) => formatCompactBRL(value)} style={{ fontSize: 9, fill: '#0f172a', fontWeight: 800 }} />
                     </Bar>
                   </BarChart>
@@ -2855,9 +3024,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     {ed.nome}
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div className="rounded-2xl bg-blue-50 p-2">
-                      <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-blue-500">Inscritos</p>
-                      <p className="m-0 text-xl font-black tabular-nums text-blue-700">{ed.inscritos.toLocaleString('pt-BR')}</p>
+                    <div className="rounded-2xl bg-emerald-50 p-2">
+                      <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-[#006B5A]">Inscritos</p>
+                      <p className="m-0 text-xl font-black tabular-nums text-[#00A38C]">{ed.inscritos.toLocaleString('pt-BR')}</p>
                     </div>
                     <div className="rounded-2xl bg-emerald-50 p-2">
                       <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-emerald-500">Contemplados</p>
@@ -2868,8 +3037,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-slate-400">Taxa</p>
                     <p className="m-0 text-lg font-black tabular-nums text-slate-800">{ed.taxa}%</p>
                   </div>
-                  <div className="mt-2 rounded-2xl bg-[#0b57d0] p-2 text-white">
-                    <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-blue-100">Valor investido</p>
+                  <div className="mt-2 rounded-2xl bg-[#00A38C] p-2 text-white">
+                    <p className="m-0 text-[0.58rem] font-black uppercase tracking-[0.12em] text-emerald-50">Valor investido</p>
                     <p className="m-0 text-base font-black tabular-nums">{formatBRL(ed.valor)}</p>
                   </div>
                   {links && (
@@ -2902,16 +3071,16 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider text-[#5f5f6a]" title="Taxa de contemplação = contemplados / inscritos">
                       Taxa de Contemplação
                     </th>
-                    <th className="px-6 py-4 text-right text-xs font-black uppercase tracking-wider text-[#0b57d0]">Valor Investido</th>
+                    <th className="px-6 py-4 text-right text-xs font-black uppercase tracking-wider text-[#00A38C]">Valor Investido</th>
                     <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider text-[#5f5f6a]">Links</th>
                   </tr>
                 </thead>
                 <tbody>
                   {resumoGlobal.breakdownEditais.map((ed, idx) => (
-                    <tr key={`edital-row-${(ed as { chave?: string }).chave ?? ed.nome}-${idx}`} className="border-b border-slate-100 transition-colors hover:bg-blue-50/40">
+                    <tr key={`edital-row-${(ed as { chave?: string }).chave ?? ed.nome}-${idx}`} className="border-b border-slate-100 transition-colors hover:bg-emerald-50/50">
                       <td className="px-6 py-4 font-bold text-[#1b1b1f]">{ed.nome}</td>
                       <td className="text-center px-4 py-4">
-                        <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-full text-xs">
+                        <span className="inline-flex items-center gap-1 bg-emerald-100 text-[#006B5A] font-bold px-3 py-1 rounded-full text-xs">
                           {ed.inscritos}
                         </span>
                       </td>
@@ -2933,7 +3102,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                           </span>
                         </div>
                       </td>
-                      <td className="text-right px-6 py-4 font-black text-[#0b57d0]">{formatBRL(ed.valor)}</td>
+                      <td className="text-right px-6 py-4 font-black text-[#00A38C]">{formatBRL(ed.valor)}</td>
                       <td className="text-center px-4 py-4">
                         {(() => {
                           const links = resolveEditalLinks(ed.nome, resumoGlobal.customEditalLinks);
@@ -2961,12 +3130,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 <tfoot>
                   <tr className="border-t-2 border-slate-300 bg-slate-50">
                     <td className="px-6 py-4 font-black text-[#1b1b1f] uppercase text-xs">Total Geral</td>
-                    <td className="text-center px-4 py-4 font-black text-blue-800">{resumoGlobal.breakdownEditais.reduce((a, e) => a + e.inscritos, 0)}</td>
+                    <td className="text-center px-4 py-4 font-black text-[#006B5A]">{resumoGlobal.breakdownEditais.reduce((a, e) => a + e.inscritos, 0)}</td>
                     <td className="text-center px-4 py-4 font-black text-emerald-800">{resumoGlobal.breakdownEditais.reduce((a, e) => a + e.contemplados, 0)}</td>
                     <td className="text-center px-4 py-4 font-bold text-[#5f5f6a] text-xs">
                       {(() => { const ti = resumoGlobal.breakdownEditais.reduce((a, e) => a + e.inscritos, 0); const tc = resumoGlobal.breakdownEditais.reduce((a, e) => a + e.contemplados, 0); return ti > 0 ? Math.round((tc / ti) * 100) : 0; })()}%
                     </td>
-                    <td className="text-right px-6 py-4 font-black text-[#0b57d0]">{formatBRL(resumoGlobal.breakdownEditais.reduce((a, e) => a + e.valor, 0))}</td>
+                    <td className="text-right px-6 py-4 font-black text-[#00A38C]">{formatBRL(resumoGlobal.breakdownEditais.reduce((a, e) => a + e.valor, 0))}</td>
                     <td className="text-center px-4 py-4"></td>
                   </tr>
                 </tfoot>
@@ -3087,14 +3256,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
           <HomeDiversityCharts data={resumoGlobal.diversityCharts} chartUid={chartUid} />
           
           {/* 📝 Nota explicativa sobre dados de diversidade */}
-          <div className="mt-6 flex gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-            <ScrollText className="mt-0.5 shrink-0 text-blue-700" size={18} aria-hidden />
-            <p className="text-sm font-medium leading-relaxed text-blue-900">
+          <div className="mt-6 flex gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <ScrollText className="mt-0.5 shrink-0 text-[#006B5A]" size={18} aria-hidden />
+            <p className="text-sm font-medium leading-relaxed text-[#063B31]">
               <strong>Nota metodológica:</strong> Os indicadores combinam <strong>agentes culturais</strong> (mapeamento) e <strong>proponentes de editais</strong>.
               <strong> Negros/pardos</strong> vêm apenas de cor/raça declarada. <strong>LGBTQIA+</strong> combina orientação sexual, identidade de gênero e gênero (cadastro único no total); nos gráficos, orientação e identidade aparecem em eixos separados, apartados do racial.
               Gênero, idade e deficiência dependem dos campos na planilha. <strong>Comunidades tradicionais</strong> seguem a mesma regra do painel <strong>Admin</strong> (vínculo identificável); &quot;Sim&quot; genérico sem comunidade não entra no total.
               {resumoGlobal.mulheres === 0 && resumoGlobal.negros === 0 && resumoGlobal.lgbtqia === 0 && (
-                <span className="mt-1 block text-blue-700">As planilhas importadas ainda não trazem gênero, cor/raça ou dados de orientação/identidade LGBTQIA+ de forma classificável.</span>
+                <span className="mt-1 block text-[#006B5A]">As planilhas importadas ainda não trazem gênero, cor/raça ou dados de orientação/identidade LGBTQIA+ de forma classificável.</span>
               )}
             </p>
           </div>
@@ -3116,12 +3285,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
               borderRadius: '28px',
               overflow: 'hidden',
               fontFamily: 'inherit',
-              border: '1px solid rgba(227, 6, 19, 0.14)',
+              border: '1px solid rgba(0, 163, 140, 0.18)',
               boxShadow:
-                '0 2px 6px rgba(227,6,19,0.06), 0 20px 56px rgba(15,23,42,0.09)',
+                '0 2px 6px rgba(0,163,140,0.07), 0 20px 56px rgba(15,23,42,0.09)',
               transition: 'box-shadow 0.3s ease',
               '&:hover': {
-                boxShadow: '0 4px 12px rgba(227,6,19,0.08), 0 28px 72px rgba(15,23,42,0.11)',
+                boxShadow: '0 4px 12px rgba(0,163,140,0.11), 0 28px 72px rgba(15,23,42,0.11)',
               },
             }}
           >
@@ -3132,7 +3301,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 px: { xs: 2.5, md: 4 },
                 py: { xs: 3, md: 3.75 },
                 background:
-                  'linear-gradient(125deg, rgba(227,6,19,0.11) 0%, rgba(255,255,255,1) 38%, rgba(11,87,208,0.07) 100%)',
+                  'linear-gradient(125deg, rgba(46,214,163,0.18) 0%, rgba(255,255,255,1) 42%, rgba(242,184,75,0.16) 100%)',
                 borderBottom: '1px solid rgba(15,23,42,0.06)',
                 '&::before': {
                   content: '""',
@@ -3142,7 +3311,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   bottom: 0,
                   width: 5,
                   borderRadius: '0 6px 6px 0',
-                  background: `linear-gradient(180deg, ${CORES_CADASTRO.aldir} 0%, #9f0510 100%)`,
+                  background: `linear-gradient(180deg, #00A38C 0%, #006B5A 100%)`,
                   zIndex: 1,
                 },
                 '&::after': {
@@ -3153,7 +3322,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   width: 'min(52vw, 420px)',
                   height: 'min(52vw, 420px)',
                   borderRadius: '50%',
-                  background: `radial-gradient(circle at center, ${CORES_CADASTRO.aldir}22 0%, transparent 68%)`,
+                  background: 'radial-gradient(circle at center, rgba(46,214,163,0.22) 0%, transparent 68%)',
                   filter: 'blur(2px)',
                   pointerEvents: 'none',
                 },
@@ -3197,13 +3366,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        background: 'linear-gradient(145deg, #E30613 0%, #ff5a5f 50%, #b5050f 100%)',
+                        background: 'linear-gradient(145deg, #2ED6A3 0%, #00A38C 55%, #006B5A 100%)',
                       }}
                       animate={{
                         boxShadow: [
-                          '0 12px 32px rgba(227,6,19,0.34)',
-                          '0 18px 44px rgba(227,6,19,0.48)',
-                          '0 12px 32px rgba(227,6,19,0.34)',
+                          '0 12px 32px rgba(0,163,140,0.28)',
+                          '0 18px 44px rgba(0,163,140,0.42)',
+                          '0 12px 32px rgba(0,163,140,0.28)',
                         ],
                       }}
                       transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
@@ -3229,9 +3398,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
                           letterSpacing: '0.07em',
                           borderRadius: '999px',
                           fontFamily: 'inherit',
-                          bgcolor: 'rgba(227, 6, 19, 0.12)',
-                          color: CORES_CADASTRO.aldir,
-                          border: '1px solid rgba(227, 6, 19, 0.22)',
+                          bgcolor: 'rgba(0, 163, 140, 0.12)',
+                          color: '#006B5A',
+                          border: '1px solid rgba(0, 163, 140, 0.24)',
                           backdropFilter: 'blur(8px)',
                         }}
                       />
@@ -3294,7 +3463,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                             fontSize: { xs: '0.85rem', sm: '0.95rem' },
                             lineHeight: 1.45,
                             letterSpacing: '-0.02em',
-                            backgroundImage: `linear-gradient(115deg, ${CORES_CADASTRO.aldir} 0%, #ff5a6d 42%, ${CORES_CADASTRO.principal} 100%)`,
+                        backgroundImage: 'linear-gradient(115deg, #00A38C 0%, #2ED6A3 48%, #F2B84B 100%)',
                             WebkitBackgroundClip: 'text',
                             WebkitTextFillColor: 'transparent',
                             backgroundClip: 'text',
@@ -3318,8 +3487,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
                       p: { xs: 2.5, md: 3.25 },
                       borderRadius: '20px',
                       border: '1px solid rgba(15,23,42,0.06)',
-                      borderLeft: `4px solid ${CORES_CADASTRO.aldir}`,
-                      bgcolor: 'rgba(248, 250, 252, 0.85)',
+                      borderLeft: '4px solid #00A38C',
+                      bgcolor: 'rgba(246, 251, 247, 0.9)',
                       boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 28px rgba(15,23,42,0.04)',
                     }}
                   >
@@ -3336,7 +3505,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                         Seleção e premiação
                       </Box>{' '}
                       de pessoas que tenham prestado relevante contribuição ao desenvolvimento artístico e cultural do município Ilhabela – SP, que foram apoiados com recursos emergenciais da{' '}
-                      <Box component="strong" sx={{ color: CORES_CADASTRO.aldir, fontWeight: 800 }}>
+                      <Box component="strong" sx={{ color: '#006B5A', fontWeight: 800 }}>
                         Lei Federal de Emergência Cultural Aldir Blanc nº 14.017/2020
                       </Box>
                       .
@@ -3373,7 +3542,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                               right: 0,
                               top: 0,
                               height: 4,
-                              background: `linear-gradient(90deg, ${edital.cor} 0%, ${edital.cor}99 55%, transparent 100%)`,
+                              background: 'linear-gradient(90deg, #00A38C 0%, rgba(46,214,163,0.75) 55%, transparent 100%)',
                             },
                           }}
                         >
@@ -3392,28 +3561,28 @@ export function HomePage({ onNavigate }: HomePageProps) {
                                   fontWeight: 900,
                                   fontSize: '0.9rem',
                                   fontFamily: 'inherit',
-                                  background: `linear-gradient(145deg, ${edital.cor} 0%, ${edital.cor}cc 100%)`,
-                                  boxShadow: `0 8px 20px ${edital.cor}55`,
+                                  background: 'linear-gradient(145deg, #2ED6A3 0%, #00A38C 100%)',
+                                  boxShadow: '0 8px 20px rgba(0,163,140,0.28)',
                                 }}
                               >
                                 {edital.numero.split('/')[0]}
                               </Box>
                               <Box sx={{ minWidth: 0, flex: 1 }}>
                                 <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mb: 0.75 }}>
-                                  <Chip
-                                    label={`Chamada ${edital.chamada}`}
-                                    size="small"
-                                    sx={{
-                                      height: 22,
-                                      fontWeight: 800,
-                                      fontSize: '0.62rem',
-                                      letterSpacing: '0.06em',
-                                      borderRadius: '8px',
-                                      fontFamily: 'inherit',
-                                      bgcolor: 'rgba(15,23,42,0.06)',
-                                      color: '#475569',
-                                    }}
-                                  />
+                                <Chip
+                                  label={`Chamada ${edital.chamada}`}
+                                  size="small"
+                                  sx={{
+                                    height: 22,
+                                    fontWeight: 800,
+                                    fontSize: '0.62rem',
+                                    letterSpacing: '0.06em',
+                                    borderRadius: '8px',
+                                    fontFamily: 'inherit',
+                                    bgcolor: 'rgba(15,23,42,0.06)',
+                                    color: '#475569',
+                                  }}
+                                />
                                   <Chip
                                     label={edital.origemAdmin ? 'Dados do Admin' : 'Editável no Admin'}
                                     size="small"
@@ -3423,8 +3592,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
                                       fontSize: '0.62rem',
                                       borderRadius: '8px',
                                       fontFamily: 'inherit',
-                                      bgcolor: edital.origemAdmin ? 'rgba(16,185,129,0.12)' : 'rgba(11,87,208,0.10)',
-                                      color: edital.origemAdmin ? '#047857' : '#0b57d0',
+                                      bgcolor: edital.origemAdmin ? 'rgba(16,185,129,0.12)' : 'rgba(0,163,140,0.10)',
+                                      color: edital.origemAdmin ? '#047857' : '#006B5A',
                                     }}
                                   />
                                 </Stack>
@@ -3454,13 +3623,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
                                         <p className="text-[0.62rem] font-black uppercase tracking-wide text-emerald-500">Aprovados</p>
                                         <p className="text-sm font-black text-emerald-700">{edital.contemplados}</p>
                                       </div>
-                                      <div className="rounded-xl bg-blue-50 px-2 py-2 text-center">
-                                        <p className="text-[0.62rem] font-black uppercase tracking-wide text-blue-500">Taxa</p>
-                                        <p className="text-sm font-black text-blue-700">{edital.taxa}%</p>
+                                      <div className="rounded-xl bg-amber-50 px-2 py-2 text-center">
+                                        <p className="text-[0.62rem] font-black uppercase tracking-wide text-amber-600">Taxa</p>
+                                        <p className="text-sm font-black text-amber-700">{edital.taxa}%</p>
                                       </div>
                                     </div>
                                     {edital.valor > 0 && (
-                                      <p className="mt-2 text-xs font-black text-[#0b57d0]">
+                                      <p className="mt-2 text-xs font-black text-[#006B5A]">
                                         {formatBRL(edital.valor)} investidos
                                       </p>
                                     )}
@@ -3527,10 +3696,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          bgcolor: 'rgba(11, 87, 208, 0.1)',
+                          bgcolor: 'rgba(0, 163, 140, 0.12)',
                         }}
                       >
-                        <ShieldCheck size={22} className="text-[#0b57d0]" />
+                        <ShieldCheck size={22} className="text-[#00A38C]" />
                       </Box>
                       <Typography sx={{ fontFamily: 'inherit', fontWeight: 800, fontSize: '1.05rem', color: '#0f172a' }}>
                         Sobre a lei
@@ -3558,12 +3727,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     sx={{
                       p: 3,
                       borderRadius: '22px',
-                      border: '1px solid rgba(11, 87, 208, 0.18)',
-                      background: 'linear-gradient(165deg, rgba(239,246,255,0.95) 0%, rgba(255,255,255,0.98) 55%, rgba(219,234,254,0.35) 100%)',
-                      boxShadow: '0 10px 36px rgba(11,87,208,0.08)',
+                      border: '1px solid rgba(0, 163, 140, 0.18)',
+                      background: 'linear-gradient(165deg, rgba(240,251,244,0.96) 0%, rgba(255,255,255,0.98) 55%, rgba(242,184,75,0.16) 100%)',
+                      boxShadow: '0 10px 36px rgba(0,163,140,0.09)',
                     }}
                   >
-                    <Typography sx={{ fontFamily: 'inherit', fontWeight: 800, fontSize: '1.05rem', color: '#0b57d0', mb: 1 }}>
+                    <Typography sx={{ fontFamily: 'inherit', fontWeight: 800, fontSize: '1.05rem', color: '#006B5A', mb: 1 }}>
                       Resultados oficiais
                     </Typography>
                     <Typography sx={{ fontFamily: 'inherit', fontSize: '0.875rem', color: '#64748b', fontWeight: 600, mb: 2.5, lineHeight: 1.5 }}>
@@ -3581,37 +3750,15 @@ export function HomePage({ onNavigate }: HomePageProps) {
                         borderRadius: '999px',
                         py: 1.35,
                         fontSize: '0.9rem',
-                        background: 'linear-gradient(135deg, #0b57d0 0%, #1967d2 45%, #1557b0 100%)',
-                        boxShadow: '0 4px 14px rgba(11,87,208,0.35)',
+                        background: 'linear-gradient(135deg, #00A38C 0%, #2ED6A3 48%, #006B5A 100%)',
+                        boxShadow: '0 4px 14px rgba(0,163,140,0.32)',
                         '&:hover': {
-                          boxShadow: '0 8px 24px rgba(11,87,208,0.42)',
-                          background: 'linear-gradient(135deg, #174ea6 0%, #0b57d0 100%)',
+                          boxShadow: '0 8px 24px rgba(0,163,140,0.42)',
+                          background: 'linear-gradient(135deg, #006B5A 0%, #00A38C 100%)',
                         },
                       }}
                     >
                       Acessar resultados
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      fullWidth
-                      onClick={() => onNavigate('admin')}
-                      sx={{
-                        mt: 1.25,
-                        fontFamily: 'inherit',
-                        fontWeight: 800,
-                        textTransform: 'none',
-                        borderRadius: '999px',
-                        py: 1.15,
-                        fontSize: '0.86rem',
-                        borderColor: 'rgba(227,6,19,0.24)',
-                        color: CORES_CADASTRO.aldir,
-                        '&:hover': {
-                          borderColor: 'rgba(227,6,19,0.42)',
-                          bgcolor: 'rgba(227,6,19,0.04)',
-                        },
-                      }}
-                    >
-                      Editar dados no Admin
                     </Button>
                   </Paper>
                 </Stack>
@@ -3705,8 +3852,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
                         <stop offset="100%" stopColor={CORES_CADASTRO.principal} stopOpacity={0.88} />
                       </linearGradient>
                       <linearGradient id={`homeGradEvolArea-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0b57d0" stopOpacity={0.16} />
-                        <stop offset="100%" stopColor="#0b57d0" stopOpacity={0.02} />
+                        <stop offset="0%" stopColor="#00A38C" stopOpacity={0.16} />
+                        <stop offset="100%" stopColor="#00A38C" stopOpacity={0.02} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -3722,7 +3869,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     <YAxis
                       yAxisId="acumulado"
                       orientation="right"
-                      tick={{ fontSize: 11, fill: '#0b57d0', fontWeight: 700 }}
+                      tick={{ fontSize: 11, fill: '#00A38C', fontWeight: 700 }}
                       axisLine={false}
                       tickLine={false}
                       tickFormatter={formatCompactBRL}
@@ -3751,10 +3898,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
                       type="monotone"
                       dataKey="acumulado"
                       name="Acumulado"
-                      stroke="#0b57d0"
+                      stroke="#00A38C"
                       strokeWidth={2.5}
-                      dot={{ r: 4, fill: '#0b57d0', stroke: '#fff', strokeWidth: 2 }}
-                      activeDot={{ r: 6, fill: '#0b57d0', stroke: '#fff', strokeWidth: 2 }}
+                      dot={{ r: 4, fill: '#00A38C', stroke: '#fff', strokeWidth: 2 }}
+                      activeDot={{ r: 6, fill: '#00A38C', stroke: '#fff', strokeWidth: 2 }}
                       isAnimationActive={false}
                     />
                   </ComposedChart>
@@ -3792,13 +3939,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 height: 28,
                 borderRadius: '999px',
                 bgcolor: 'rgba(11, 87, 208, 0.08)',
-                color: '#0b57d0',
+                color: '#00A38C',
                 border: '1px solid rgba(11, 87, 208, 0.18)',
                 fontFamily: 'inherit',
               }}
             />
             <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap">
-              <FileText className="text-[#0b57d0]" size={28} strokeWidth={2} />
+              <FileText className="text-[#00A38C]" size={28} strokeWidth={2} />
               <Typography component="h2" sx={{ fontFamily: 'inherit', fontWeight: 900, fontSize: { xs: '1.5rem', sm: '1.75rem' }, color: '#0f172a', letterSpacing: '-0.02em' }}>
                 Editais e chamadas públicas
               </Typography>
@@ -3841,7 +3988,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     <YAxis
                       yAxisId="valor"
                       orientation="right"
-                      tick={{ fontSize: 10, fill: '#0b57d0', fontWeight: 700 }}
+                      tick={{ fontSize: 10, fill: '#00A38C', fontWeight: 700 }}
                       axisLine={false}
                       tickLine={false}
                       tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`}
@@ -3863,10 +4010,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
                       type="monotone"
                       dataKey="valor"
                       name="Valor Investido"
-                      stroke="#0b57d0"
+                      stroke="#00A38C"
                       strokeWidth={2.2}
-                      dot={{ r: 3, fill: '#0b57d0', strokeWidth: 0 }}
-                      activeDot={{ r: 5, fill: '#0b57d0', stroke: '#fff', strokeWidth: 2 }}
+                      dot={{ r: 3, fill: '#00A38C', strokeWidth: 0 }}
+                      activeDot={{ r: 5, fill: '#00A38C', stroke: '#fff', strokeWidth: 2 }}
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -3878,7 +4025,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                   if (!links || (!links.resultado && !links.resumo && !links.diarioOficial)) return null;
                   return (
                     <div key={`links-compact-${edital.nome}`} className="rounded-xl border border-slate-100 bg-slate-50/75 p-3">
-                      <p className="mb-2 text-xs font-black text-[#0b57d0]">{edital.nome}</p>
+                      <p className="mb-2 text-xs font-black text-[#006B5A]">{edital.nome}</p>
                       <Stack direction="row" flexWrap="wrap" gap={1}>
                         {links.resultado && (
                           <Button
@@ -3938,8 +4085,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
         <Card sx={{ borderRadius: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid #f3f4f6' }}>
           <CardContent className="p-10">
             <div className="flex items-center gap-3 mb-8">
-              <div className="p-3 bg-blue-50 rounded-xl">
-                <Calendar className="text-[#0b57d0]" size={24} />
+              <div className="p-3 bg-emerald-50 rounded-xl">
+                <Calendar className="text-[#00A38C]" size={24} />
               </div>
               <div>
                 <h3 className="text-xl font-bold text-[#1b1b1f]">Linha do Tempo</h3>
@@ -3982,7 +4129,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
           </div>
           
           {/* Decorative elements */}
-          <div className="absolute top-0 left-0 w-64 h-64 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-35 animate-blob"></div>
+          <div className="absolute top-0 left-0 w-64 h-64 bg-emerald-200 rounded-full mix-blend-multiply filter blur-3xl opacity-35 animate-blob"></div>
           <div className="absolute bottom-0 right-0 w-64 h-64 bg-emerald-200 rounded-full mix-blend-multiply filter blur-3xl opacity-35 animate-blob animation-delay-2000"></div>
         </div>
       </section>

@@ -1,25 +1,33 @@
 /**
- * Vídeos de fundo do hero na Home (atrás do título “Cadastro Cultural de Ilhabela”).
+ * Vídeos de fundo do hero na Home.
  *
- * ONDE COLOCAR OS FICHEIROS (organizado):
- *   src/app/data/videos/
- * Coloque aqui os `.mp4`, `.webm`, `.mov` / `.MOV`, `.m4v`. Não precisa editar a lista abaixo:
- * os URLs são gerados automaticamente para todos os ficheiros dessa pasta (exceto
- * ficheiros que não sejam vídeo).
+ * `import.meta.glob` **sem** `eager: true` — os URLs resolvem-se em runtime (chunks pequenos),
+ * em vez de empacotar todas as referências no bundle inicial.
  *
- * Nota: vídeos muito grandes (centenas de MB) pesam no build e no primeiro carregamento;
- * para produção, considere comprimir ou usar ficheiros em `public/videos/` com URLs `/videos/...`.
+ * Produção: use `VITE_HERO_VIDEO_URLS` com ficheiros leves em `public/videos/` (ex.: `.mp4` ~2–8MB)
+ * em vez de `.MOV` muito grandes no repositório.
  */
 
 const heroVideoFilePattern = /\.(mp4|webm|mov|m4v)$/i;
 
-const heroVideoModules = import.meta.glob('./videos/*', {
-  eager: true,
-  query: '?url',
-  import: 'default',
-}) as Record<string, string>;
+const heroVideoModules = import.meta.glob(
+  ['./mapeamento-2020-videos/*', './mapeamento 2020 - videos/*', './data-mapeamento 2020 - videos/*', './videos/*'],
+  {
+    query: '?url',
+    import: 'default',
+  }
+) as Record<string, () => Promise<string>>;
 
-export const HERO_BACKGROUND_VIDEO_URLS: string[] = Object.entries(heroVideoModules)
-  .filter(([path]) => heroVideoFilePattern.test(path))
-  .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-  .map(([, url]) => url);
+const configuredHeroVideos = String(import.meta.env.VITE_HERO_VIDEO_URLS || '')
+  .split(',')
+  .map((url) => url.trim())
+  .filter((url) => heroVideoFilePattern.test(url));
+
+/** Resolve todos os URLs (ficheiros locais + env). Chamar uma vez no mount da Home. */
+export async function loadHeroBackgroundVideoUrls(): Promise<string[]> {
+  const entries = Object.entries(heroVideoModules)
+    .filter(([path]) => heroVideoFilePattern.test(path))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  const fromGlob = await Promise.all(entries.map(([, load]) => load()));
+  return [...fromGlob, ...configuredHeroVideos];
+}

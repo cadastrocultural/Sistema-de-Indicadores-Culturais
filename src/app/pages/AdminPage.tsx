@@ -3,11 +3,11 @@ import {
   Button, Card, CardContent, Alert, Tabs, Tab, Box,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, TextField, Select, MenuItem, FormControl, InputLabel,
-  Chip, Grid, Typography, Divider, Checkbox, TablePagination, IconButton, Stack, Tooltip, FormControlLabel, Link
+  Chip, Grid, Typography, Divider, Checkbox, TablePagination, IconButton, Stack, Tooltip, FormControlLabel, Link, LinearProgress
 } from '@mui/material';
 import {
   Upload, Download, Database, CheckCircle, FileSpreadsheet,
-  Eye, Save, MapPin, Edit, Trash2, Plus, AlertCircle, RefreshCw, Users, Info, Award, Search, ListChecks, LogOut
+  Eye, Save, MapPin, Edit, Trash2, Plus, AlertCircle, RefreshCw, Users, Info, Award, Search, ListChecks, LogOut, ShieldCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
@@ -18,6 +18,7 @@ import {
   looksLikeEnderecoCompleto,
   resolveCoordsForIlhabela,
 } from '../data/bairros-coords';
+import { DADOS_ESTATICOS } from '../data/dados-estaticos';
 
 // Imports dos módulos extraídos para reduzir tamanho do arquivo
 import { 
@@ -46,12 +47,14 @@ import {
   pickRicherCadastroPayload,
   isProjetoContemplado,
   getProjetoValorNormalizado,
+  OFFICIAL_ALDIR_BLANC_2020_VALUES,
   parseBRLField,
 } from './admin/projetosDemandaOferta';
 import { inferGenderFromName } from './admin/genderInference';
 import { universalFieldScanner } from './admin/universalScanner';
 import { resolveComunidadeTradicional } from './admin/comunidadeTradicionalUtils';
 import { AdminImportCharts } from '../components/admin/AdminImportCharts';
+import { dedupeMapeamentoCadastroRows } from '../data/estatisticas-publicas';
 import { 
   isUrl, 
   isAttachmentColumn, 
@@ -62,11 +65,14 @@ import {
   anonEndereco,
   extractEnderecoCompletoFromCadastroRow,
 } from './admin/fieldUtils';
+import { getSupabaseClient, isSupabaseAuthConfigured } from '../../lib/supabaseClient';
 
 interface AdminPageProps {
   onNavigate: (page: string) => void;
   adminAuthed: boolean;
   setAdminAuthed: (value: boolean) => void;
+  /** false até `getSession()` concluir quando Supabase Auth está configurado */
+  adminAuthReady?: boolean;
 }
 
 interface ParsedData {
@@ -82,7 +88,20 @@ interface ParsedData {
   editalResumoOverrides?: Record<string, EditalResumoOverride>;
   /** Chaves `edital||ano` ocultas na tabela "Demanda vs Oferta" da Home (dados permanecem no Admin). */
   demandaOfertaExcluidosHome?: string[];
+  eventosCidade?: EventoCidade[];
 }
+
+type EventoCidade = {
+  id: string;
+  titulo: string;
+  data: string;
+  hora?: string;
+  local?: string;
+  categoria?: string;
+  descricao?: string;
+  link?: string;
+  publicado: boolean;
+};
 
 /** Campos opcionais: ausente = usar valor calculado da planilha */
 type EditalResumoOverride = {
@@ -188,14 +207,17 @@ interface Projeto {
   lng?: number;
 }
 
-export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPageProps) {
+export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthReady = true }: AdminPageProps) {
   const UNDO_SNAPSHOT_KEY = 'editais_imported_data_last_snapshot';
   const ADMIN_ACTIVE_TAB_KEY = 'admin_active_tab';
+  /** Abas válidas: 0–4 (sidebar). Valores maiores (ex.: localStorage corrompido) deixavam o painel sem conteúdo. */
+  const ADMIN_TAB_MAX = 4;
   const [tabValue, setTabValue] = useState(() => {
     try {
       const saved = localStorage.getItem(ADMIN_ACTIVE_TAB_KEY);
       const parsed = saved !== null ? Number(saved) : 0;
-      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+      const n = Number.isFinite(parsed) ? parsed : 0;
+      return Math.max(0, Math.min(ADMIN_TAB_MAX, n));
     } catch {
       return 0;
     }
@@ -214,6 +236,10 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
   const [buscaProponente, setBuscaProponente] = useState<string>(''); // 🔍 Pesquisa por proponente
   const [buscaParticipante, setBuscaParticipante] = useState<string>(''); // 🔍 Pesquisa na aba Participações
   const [adminLoginPin, setAdminLoginPin] = useState('');
+  const [adminAuthEmail, setAdminAuthEmail] = useState('');
+  const [adminAuthPassword, setAdminAuthPassword] = useState('');
+  const [supabaseLoginLoading, setSupabaseLoginLoading] = useState(false);
+  const [supabaseLoginError, setSupabaseLoginError] = useState('');
   const [lastImportDuplicatesRemoved, setLastImportDuplicatesRemoved] = useState(0);
   
   // 🎯 Estado para edição inline
@@ -239,6 +265,23 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
   const [customEditalLinks, setCustomEditalLinks] = useState<Record<string, { resultado?: string; resumo?: string; diarioOficial?: string }>>({}); 
   const [hasUndoSnapshot, setHasUndoSnapshot] = useState(false);
   const [recoveringData, setRecoveringData] = useState(false);
+  const GALLERY_UPLOAD_KEY = 'gallery_uploaded_images_by_year';
+  const [galleryUploadYear, setGalleryUploadYear] = useState(String(new Date().getFullYear()));
+  /** Aplicado a cada ficheiro do envio (opcional). */
+  const [galleryUploadArtist, setGalleryUploadArtist] = useState('');
+  const [galleryUploadedImages, setGalleryUploadedImages] = useState<any[]>([]);
+  const [galleryUploadMessage, setGalleryUploadMessage] = useState('');
+  const [editingEventoId, setEditingEventoId] = useState<string | null>(null);
+  const [eventoForm, setEventoForm] = useState<Omit<EventoCidade, 'id'>>({
+    titulo: '',
+    data: '',
+    hora: '',
+    local: '',
+    categoria: 'Cultura',
+    descricao: '',
+    link: '',
+    publicado: true,
+  });
 
   const showFeedback = (type: 'success' | 'info' | 'warning' | 'error', text: string) => {
     setActionFeedback({ type, text });
@@ -251,8 +294,155 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
   const fileInputGrupos = useRef<HTMLInputElement>(null);
   const fileInputEspacos = useRef<HTMLInputElement>(null);
   const fileInputProjetos = useRef<HTMLInputElement>(null);
+  const fileInputGallery = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem(GALLERY_UPLOAD_KEY);
+      if (saved) setGalleryUploadedImages(JSON.parse(saved));
+    } catch {
+      setGalleryUploadedImages([]);
+    }
+  }, []);
+
+  const compressGalleryImageFile = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('Imagem inválida.'));
+        img.onload = () => {
+          const maxSide = 1600;
+          const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Não foi possível processar a imagem.'));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        };
+        img.src = String(reader.result || '');
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const handleGalleryUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'));
+    if (!files.length) return;
+    setGalleryUploadMessage('Processando imagens da galeria...');
+    try {
+      const artistTrim = galleryUploadArtist.trim();
+      const processed = await Promise.all(
+        files.map(async (file, idx) => ({
+          id: `uploaded-${galleryUploadYear}-${Date.now()}-${idx}-${file.name}`,
+          url: await compressGalleryImageFile(file),
+          year: galleryUploadYear,
+          title: file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '),
+          ...(artistTrim ? { artist: artistTrim } : {}),
+          source: 'uploaded',
+        }))
+      );
+      const next = [...galleryUploadedImages, ...processed];
+      setGalleryUploadedImages(next);
+      localStorage.setItem(GALLERY_UPLOAD_KEY, JSON.stringify(next));
+      setGalleryUploadMessage(`${processed.length} imagem(ns) adicionada(s) ao ano ${galleryUploadYear}.`);
+      showFeedback('success', `Galeria atualizada com ${processed.length} nova(s) imagem(ns).`);
+    } catch (err) {
+      console.error(err);
+      setGalleryUploadMessage('Não foi possível salvar as imagens. Tente arquivos menores ou envie menos imagens por vez.');
+      showFeedback('error', 'Falha ao processar imagens da galeria.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const resetEventoForm = () => {
+    setEditingEventoId(null);
+    setEventoForm({
+      titulo: '',
+      data: '',
+      hora: '',
+      local: '',
+      categoria: 'Cultura',
+      descricao: '',
+      link: '',
+      publicado: true,
+    });
+  };
+
+  const salvarEventoCidade = () => {
+    if (!eventoForm.titulo.trim() || !eventoForm.data) {
+      showFeedback('warning', 'Informe pelo menos o título e a data do evento.');
+      return;
+    }
+
+    const eventosAtuais = Array.isArray(parsedData.eventosCidade) ? parsedData.eventosCidade : [];
+    const evento: EventoCidade = {
+      id: editingEventoId || `evento-${Date.now()}`,
+      ...eventoForm,
+      titulo: eventoForm.titulo.trim(),
+      data: eventoForm.data,
+      hora: eventoForm.hora?.trim(),
+      local: eventoForm.local?.trim(),
+      categoria: eventoForm.categoria?.trim() || 'Cultura',
+      descricao: eventoForm.descricao?.trim(),
+      link: eventoForm.link?.trim(),
+    };
+
+    const eventosCidade = editingEventoId
+      ? eventosAtuais.map((item) => (item.id === editingEventoId ? evento : item))
+      : [...eventosAtuais, evento];
+
+    const newPD = { ...parsedData, eventosCidade };
+    setParsedData(newPD);
+    void persistData(newPD);
+    resetEventoForm();
+    showFeedback('success', 'Evento salvo e disponível para o calendário do site.');
+  };
+
+  const editarEventoCidade = (evento: EventoCidade) => {
+    setEditingEventoId(evento.id);
+    setEventoForm({
+      titulo: evento.titulo || '',
+      data: evento.data || '',
+      hora: evento.hora || '',
+      local: evento.local || '',
+      categoria: evento.categoria || 'Cultura',
+      descricao: evento.descricao || '',
+      link: evento.link || '',
+      publicado: evento.publicado !== false,
+    });
+  };
+
+  const removerEventoCidade = (eventoId: string) => {
+    if (!window.confirm('Remover este evento do calendário?')) return;
+    const eventosCidade = (parsedData.eventosCidade || []).filter((evento) => evento.id !== eventoId);
+    const newPD = { ...parsedData, eventosCidade };
+    setParsedData(newPD);
+    void persistData(newPD);
+    if (editingEventoId === eventoId) resetEventoForm();
+    showFeedback('success', 'Evento removido do calendário.');
+  };
+
+  const toggleEventoPublicado = (eventoId: string) => {
+    const eventosCidade = (parsedData.eventosCidade || []).map((evento) =>
+      evento.id === eventoId ? { ...evento, publicado: evento.publicado === false } : evento
+    );
+    const newPD = { ...parsedData, eventosCidade };
+    setParsedData(newPD);
+    void persistData(newPD);
+  };
+
+  useEffect(() => {
+    if (tabValue < 0 || tabValue > ADMIN_TAB_MAX || !Number.isFinite(tabValue)) {
+      setTabValue(0);
+      return;
+    }
     try {
       localStorage.setItem(ADMIN_ACTIVE_TAB_KEY, String(tabValue));
     } catch {
@@ -260,12 +450,18 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
     }
   }, [tabValue]);
 
+  const switchAdminTab = (newValue: number) => {
+    const v = Math.max(0, Math.min(ADMIN_TAB_MAX, Number(newValue)));
+    setTabValue(Number.isFinite(v) ? v : 0);
+    setSelectedRows(new Set());
+  };
+
   const loadDataFromServer = async () => {
     try {
       setRecoveringData(true);
       console.log('📥 [CLIENT] Carregando dados do servidor...');
       
-      const { projectId, publicAnonKey } = await import('/utils/supabase/info');
+      const { projectId, publicAnonKey } = await import('../../lib/supabaseProjectInfo');
       const serverUrl = `https://${projectId}.supabase.co/functions/v1/make-server-2320c79f/load-data`;
       
       const response = await fetch(serverUrl, {
@@ -325,6 +521,16 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
             delete parsed.customEditalLinks;
           }
           setParsedData(normalizeProjetosOnParsed(parsed) as ParsedData);
+        } else {
+          setParsedData(
+            normalizeProjetosOnParsed({
+              agentes: [],
+              grupos: [],
+              espacos: [],
+              projetos: [],
+              mapeamento: DADOS_ESTATICOS.mapeamento || [],
+            }) as ParsedData,
+          );
         }
       }
     } catch (err) {
@@ -341,9 +547,28 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
             delete parsed.customEditalLinks;
           }
           setParsedData(normalizeProjetosOnParsed(parsed) as ParsedData);
+        } else {
+          setParsedData(
+            normalizeProjetosOnParsed({
+              agentes: [],
+              grupos: [],
+              espacos: [],
+              projetos: [],
+              mapeamento: DADOS_ESTATICOS.mapeamento || [],
+            }) as ParsedData,
+          );
         }
       } catch (localErr) {
         console.error('❌ Erro no fallback localStorage:', localErr);
+        setParsedData(
+          normalizeProjetosOnParsed({
+            agentes: [],
+            grupos: [],
+            espacos: [],
+            projetos: [],
+            mapeamento: DADOS_ESTATICOS.mapeamento || [],
+          }) as ParsedData,
+        );
       }
     } finally {
       setRecoveringData(false);
@@ -648,6 +873,12 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
       ['orientacao', 'curricular'],
       ['orientacaosexual', 'projeto'],
       ['orientacaosexual', 'resumo'],
+      ['valor', 'faixadevalor'],
+      ['valor', 'faixavalor'],
+      ['valor', 'qualafaixadevalorescolhida'],
+      ['value', 'faixadevalor'],
+      ['value', 'faixavalor'],
+      ['value', 'qualafaixadevalorescolhida'],
     ];
     for (const key of keys) {
       const keyNorm = key.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
@@ -1520,7 +1751,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
             })();
             
             const valorRaw = getFieldFromRow(row,
-              'valor', 'Valor', 'VALOR', 'value', 'Valor (R$)', 'valor_aprovado', 'premio',
+              'valor', 'Valor', 'VALOR', 'Valor (R$)', 'valor_aprovado', 'premio',
               'Prêmio', 'PRÊMIO', 'Valor do Prêmio', 'valor_premio'
             );
             let valor = parseBRLField(valorRaw);
@@ -1537,37 +1768,6 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
               });
               return faixaCol ? row[faixaCol] : '';
             })();
-            
-            // 💰 EXTRAÇÃO DE VALOR POR FAIXA: se valor não encontrado mas há faixa, extrai valor da faixa
-            // Também verifica campo de linguagem artística que pode conter informação de faixa
-            if (!valor || valor === 0) {
-              // 1) Tenta extrair de campo de faixa explícito
-              if (faixa) {
-                const valorFaixa = extractValorFromFaixa(faixa);
-                if (valorFaixa > 0) valor = valorFaixa;
-              }
-              
-              // 2) Tenta extrair de campo de linguagem artística (pode conter "Faixa X")
-              if ((!valor || valor === 0) && areaAtuacaoRaw) {
-                const valorLinguagem = extractValorFromFaixa(areaAtuacaoRaw);
-                if (valorLinguagem > 0) valor = valorLinguagem;
-              }
-              
-              // 3) Busca em TODAS as colunas por menção de "Faixa X"
-              if (!valor || valor === 0) {
-                const rk = Object.keys(row);
-                for (const k of rk) {
-                  if (isAttachmentColumn(k)) continue;
-                  const val = row[k];
-                  if (!val) continue;
-                  const valorCol = extractValorFromFaixa(val);
-                  if (valorCol > 0) {
-                    valor = valorCol;
-                    break;
-                  }
-                }
-              }
-            }
             
             // 🎨 Área de atuação final (limpa de faixa de valor se contaminou)
             const areaAtuacao = isFaixaValorValue(areaAtuacaoRaw) ? '' : areaAtuacaoRaw;
@@ -1746,6 +1946,13 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
           setLoading(false);
           if (event.target) event.target.value = '';
           return; // Sai aqui pois já tratamos o setParsedData
+        }
+
+        if (dataType === 'mapeamento' || dataType === 'agentes' || dataType === 'grupos' || dataType === 'espacos') {
+          const n0 = processedData.length;
+          processedData = dedupeMapeamentoCadastroRows(processedData);
+          const rem = n0 - processedData.length;
+          if (rem > 0) console.log(`🔄 ${rem} duplicata(s) removida(s) na importação (${dataType})`);
         }
         
         const newParsedAfterImport: ParsedData = { ...parsedData, [dataType]: processedData } as ParsedData;
@@ -2349,26 +2556,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
       return;
     }
 
-    const normalizeText = (v: any) =>
-      String(v || '')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .trim();
-
-    const seen = new Set<string>();
-    const unique = (parsedData.mapeamento || []).filter((item) => {
-      const cpf = String(item.cpf || item.cnpj || item.cpf_cnpj || '').replace(/\D/g, '');
-      const nome = normalizeText(item.nome || item.Nome || item.proponente || '');
-      const bairro = normalizeText(item.bairro || item.Bairro || '');
-      const key = cpf ? `cpf:${cpf}` : `nome:${nome}|bairro:${bairro}`;
-
-      // Sem chave mínima: mantém para não perder dados.
-      if (!key || key === 'nome:|bairro:') return true;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    const unique = dedupeMapeamentoCadastroRows(parsedData.mapeamento || []);
 
     const removidos = parsedData.mapeamento.length - unique.length;
     
@@ -2390,13 +2578,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
       return;
     }
 
-    const unique = parsedData.agentes.filter((item, index, self) => 
-      index === self.findIndex(a => {
-        const cpfA = a.cpf || a.cnpj || a.cpf_cnpj || '';
-        const cpfB = item.cpf || item.cnpj || item.cpf_cnpj || '';
-        return cpfA === cpfB && cpfA !== '';
-      })
-    );
+    const unique = dedupeMapeamentoCadastroRows(parsedData.agentes || []);
 
     const removidos = parsedData.agentes.length - unique.length;
     
@@ -2418,20 +2600,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
       return;
     }
 
-    const unique = parsedData.grupos.filter((item, index, self) => 
-      index === self.findIndex(g => {
-        const cnpjA = g.cnpj || g.CNPJ || '';
-        const cnpjB = item.cnpj || item.CNPJ || '';
-        const nomeA = (g.nome || g.Nome || '').toLowerCase().trim();
-        const nomeB = (item.nome || item.Nome || '').toLowerCase().trim();
-        
-        // Remove duplicados por CNPJ (se existir) ou por Nome
-        if (cnpjA && cnpjB && cnpjA !== '') {
-          return cnpjA === cnpjB;
-        }
-        return nomeA === nomeB && nomeA !== '';
-      })
-    );
+    const unique = dedupeMapeamentoCadastroRows(parsedData.grupos || []);
 
     const removidos = parsedData.grupos.length - unique.length;
     
@@ -2449,17 +2618,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
       return;
     }
 
-    const unique = parsedData.espacos.filter((item, index, self) => 
-      index === self.findIndex(e => {
-        const nomeA = (e.nome || e.Nome || '').toLowerCase().trim();
-        const nomeB = (item.nome || item.Nome || '').toLowerCase().trim();
-        const bairroA = (e.bairro || e.Bairro || '').toLowerCase().trim();
-        const bairroB = (item.bairro || item.Bairro || '').toLowerCase().trim();
-        
-        // Remove duplicados por Nome + Bairro
-        return nomeA === nomeB && bairroA === bairroB && nomeA !== '';
-      })
-    );
+    const unique = dedupeMapeamentoCadastroRows(parsedData.espacos || []);
 
     const removidos = parsedData.espacos.length - unique.length;
     
@@ -2505,28 +2664,6 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
     }
     
     projeto.status = newStatus;
-    
-    // 💰 TRANSFORMAR FAIXA DE VALOR EM VALOR INVESTIDO quando marcar como Contemplado
-    if (newStatus === 'Contemplado' && (!projeto.valor || projeto.valor === 0)) {
-      // Tenta extrair valor da faixa
-      if (projeto.faixa) {
-        const valorExtraido = extractValorFromFaixa(projeto.faixa);
-        if (valorExtraido > 0) {
-          projeto.valor = valorExtraido;
-          console.log(`💰 Valor automático extraído da faixa para contemplado: R$ ${valorExtraido.toLocaleString('pt-BR')}`);
-        }
-      }
-      // Fallback: tenta extrair de faixaValor ou outras propriedades
-      if (!projeto.valor || projeto.valor === 0) {
-        if (projeto.faixaValor) {
-          const valorExtraido = extractValorFromFaixa(projeto.faixaValor);
-          if (valorExtraido > 0) {
-            projeto.valor = valorExtraido;
-            console.log(`💰 Valor automático extraído de faixaValor para contemplado: R$ ${valorExtraido.toLocaleString('pt-BR')}`);
-          }
-        }
-      }
-    }
     
     updated[projetoIndex] = projeto;
     
@@ -2585,8 +2722,17 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
         _cadastroSavedAt: new Date().toISOString(),
       };
       const dataToSave = JSON.stringify(dataWithLinks);
-      localStorage.setItem('editais_imported_data', dataToSave);
-      const { projectId, publicAnonKey } = await import('/utils/supabase/info');
+      try {
+        localStorage.setItem('editais_imported_data', dataToSave);
+      } catch (storageErr) {
+        console.warn('⚠️ [AUTO-SAVE] Backup local excedeu a cota; salvando apenas no servidor:', storageErr);
+        try {
+          localStorage.removeItem(UNDO_SNAPSHOT_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
+      const { projectId, publicAnonKey } = await import('../../lib/supabaseProjectInfo');
       const serverUrl = `https://${projectId}.supabase.co/functions/v1/make-server-2320c79f/save-data`;
       const response = await fetch(serverUrl, {
         method: 'POST',
@@ -2601,7 +2747,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
         console.warn('⚠️ [AUTO-SAVE] Erro HTTP:', response.status, detail);
         setActionFeedback({
           type: 'warning',
-          text: `Alterações salvas neste navegador, mas o servidor respondeu ${response.status}. Use «Salvar no Servidor» ou verifique a conexão para sincronizar.`,
+        text: `Não foi possível confirmar a gravação no servidor (${response.status}). O backup local pode estar limitado pela cota do navegador.`,
         });
       } else {
         console.log('✅ [AUTO-SAVE] Dados + links customizados persistidos no servidor');
@@ -2610,7 +2756,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
       console.warn('⚠️ [AUTO-SAVE] Fallback localStorage ok, erro servidor:', err);
       setActionFeedback({
         type: 'warning',
-        text: 'Alterações salvas neste navegador; não foi possível confirmar gravação no servidor. Verifique a rede ou use «Salvar no Servidor».',
+        text: 'Não foi possível confirmar gravação no servidor. Se o navegador avisou sobre cota, os dados podem estar grandes demais para backup local.',
       });
     }
   };
@@ -2775,6 +2921,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
     setCustomEditalLinks(newLinks);
     localStorage.setItem('custom_edital_links', JSON.stringify(newLinks));
     console.log(`🔗 [LINK] Link ${linkType} do edital "${editalName}" salvo: ${url}`);
+    void persistData(parsedData, newLinks);
   };
 
   // Carrega links customizados do localStorage
@@ -2955,7 +3102,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
       };
       const dataToSave = JSON.stringify(dataWithLinks);
       
-      const { projectId, publicAnonKey } = await import('/utils/supabase/info');
+      const { projectId, publicAnonKey } = await import('../../lib/supabaseProjectInfo');
       const serverUrl = `https://${projectId}.supabase.co/functions/v1/make-server-2320c79f/save-data`;
       
       const response = await fetch(serverUrl, {
@@ -2980,7 +3127,16 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
       console.log('✅ [CLIENT] Dados salvos no servidor com sucesso!');
       
       // 💾 BACKUP NO LOCALSTORAGE
-      localStorage.setItem('editais_imported_data', dataToSave);
+      try {
+        localStorage.setItem('editais_imported_data', dataToSave);
+      } catch (storageErr) {
+        console.warn('⚠️ [SAVE] Servidor salvo, mas backup local excedeu a cota:', storageErr);
+        try {
+          localStorage.removeItem(UNDO_SNAPSHOT_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
       
       alert('✅ Dados salvos com sucesso no servidor!');
       
@@ -3055,6 +3211,24 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
     });
 
     const ov = parsedData.editalResumoOverrides || {};
+    const applyOfficialAldirValues = (row: any) => {
+      const norm = `${row.nome || ''} ${row.nomeBase || ''} ${row.chave || ''}`
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      if (Number(row.ano) !== 2020 && !norm.includes('2020')) return row;
+      if (norm.includes('agentes culturais') || norm.includes('premiacao de agentes')) {
+        return { ...row, contemplados: OFFICIAL_ALDIR_BLANC_2020_VALUES.agentes.contemplados, valorContemplados: OFFICIAL_ALDIR_BLANC_2020_VALUES.agentes.valorInvestido };
+      }
+      if (norm.includes('grupos') || norm.includes('coletivos')) {
+        return { ...row, contemplados: OFFICIAL_ALDIR_BLANC_2020_VALUES.grupos.contemplados, valorContemplados: OFFICIAL_ALDIR_BLANC_2020_VALUES.grupos.valorInvestido };
+      }
+      if (norm.includes('espacos') || norm.includes('espaco cultural')) {
+        return { ...row, contemplados: OFFICIAL_ALDIR_BLANC_2020_VALUES.espacos.contemplados, valorContemplados: OFFICIAL_ALDIR_BLANC_2020_VALUES.espacos.valorInvestido };
+      }
+      return row;
+    };
+
     const porEdital = porEditalRaw.map(row => {
       const o = ov[row.chave];
       if (!o) return row;
@@ -3087,9 +3261,21 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
             ? Math.max(0, Math.min(100, o.aproveitamentoPct))
             : undefined,
       };
-    }).sort((a, b) => (b.ano || 0) - (a.ano || 0));
+    }).map(applyOfficialAldirValues).sort((a, b) => (b.ano || 0) - (a.ano || 0));
 
-    return { totalInscritos, contemplados, suplentes, naoContemplados, pessoas, valorTotal, valorContemplados, porEdital };
+    const valorContempladosAjustado = porEdital.reduce((acc, ed: any) => acc + (Number(ed.valorContemplados) || 0), 0);
+    const contempladosAjustado = porEdital.reduce((acc, ed: any) => acc + (Number(ed.contemplados) || 0), 0);
+
+    return {
+      totalInscritos,
+      contemplados: contempladosAjustado || contemplados,
+      suplentes,
+      naoContemplados,
+      pessoas,
+      valorTotal,
+      valorContemplados: valorContempladosAjustado || valorContemplados,
+      porEdital,
+    };
   };
 
   const stats = projetosStats();
@@ -3270,59 +3456,165 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
 
   const ADMIN_PIN_ENV = import.meta.env.VITE_ADMIN_PIN;
   const adminPinEnv = typeof ADMIN_PIN_ENV === 'string' && ADMIN_PIN_ENV.length >= 4 ? ADMIN_PIN_ENV.trim() : 'Bonete22';
-  const adminPinRequired = true;
+  const adminPinRequired = !isSupabaseAuthConfigured();
+  const useSupabaseAdminAuth = isSupabaseAuthConfigured();
+  const trySupabaseLogin = async () => {
+    const client = getSupabaseClient();
+    if (!client) {
+      setSupabaseLoginError('Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY e reinicie o build.');
+      return;
+    }
+    setSupabaseLoginError('');
+    setSupabaseLoginLoading(true);
+    const { error } = await client.auth.signInWithPassword({
+      email: adminAuthEmail.trim(),
+      password: adminAuthPassword,
+    });
+    setSupabaseLoginLoading(false);
+    if (error) {
+      setSupabaseLoginError(error.message);
+      return;
+    }
+    setAdminAuthPassword('');
+    setAdminAuthed(true);
+  };
+  const adminSidebarItems = [
+    { label: 'Mapeamento 2020', icon: '▦', tab: 0 },
+    { label: 'Projetos / Editais', icon: '□', tab: 1 },
+    { label: 'Participações', icon: '○', tab: 2 },
+    { label: 'Galeria / Uploads', icon: '◇', tab: 3 },
+    { label: 'Calendário / Eventos', icon: '◷', tab: 4 },
+  ];
+  const totalCadastrosAdmin = (parsedData.agentes?.length || 0) + (parsedData.grupos?.length || 0) + (parsedData.espacos?.length || 0);
+  const totalProjetosAdmin = parsedData.projetos?.length || 0;
+  const totalImagensAdmin = galleryUploadedImages.length;
+  const eventosOrdenadosAdmin = [...(parsedData.eventosCidade || [])]
+    .filter((e): e is EventoCidade => e != null && typeof e === 'object')
+    .sort((a, b) => `${a.data || ''} ${a.hora || ''}`.localeCompare(`${b.data || ''} ${b.hora || ''}`, 'pt-BR'));
 
   if (!adminAuthed) {
     return (
-      <div className="min-h-screen bg-[#fdfcff] py-16 px-6">
-        <div className="max-w-md mx-auto">
-          <Card sx={{ borderRadius: 3, boxShadow: '0 8px 32px rgba(0,0,0,0.08)' }}>
+      <div className="min-h-screen bg-gradient-to-br from-[#12c5d7] via-[#168bd8] to-[#236de0] px-6 py-16">
+        <div className="mx-auto max-w-md">
+          <Card sx={{ borderRadius: '28px', overflow: 'hidden', boxShadow: '0 28px 90px rgba(13,47,96,0.28)' }}>
+            <Box sx={{ bgcolor: '#284574', color: '#fff', p: 4, textAlign: 'center' }}>
+              <Box sx={{ mx: 'auto', mb: 2, width: 92, height: 92, borderRadius: '50%', bgcolor: '#ff8bd2', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '5px solid rgba(255,255,255,0.35)' }}>
+                <ShieldCheck size={42} />
+              </Box>
+              <Typography variant="h5" sx={{ fontWeight: 900 }}>
+                Painel Administrativo
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 0.75, color: 'rgba(255,255,255,0.72)', fontWeight: 600 }}>
+                Cadastro Cultural de Ilhabela
+              </Typography>
+            </Box>
             <CardContent sx={{ p: 4 }}>
-              <Typography variant="h5" sx={{ fontWeight: 800, mb: 1, color: '#1b1b1f' }}>
+              <Typography variant="h6" sx={{ fontWeight: 800, mb: 1, color: '#1b1b1f' }}>
                 Acesso ao painel
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                {adminPinRequired
-                  ? 'Informe o PIN configurado em VITE_ADMIN_PIN no arquivo .env do projeto.'
-                  : 'Nenhum PIN configurado. Clique em "Entrar" para acessar. Para proteger o painel, crie um arquivo .env com VITE_ADMIN_PIN=seu_pin e reinicie o servidor.'}
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2, fontWeight: 600, lineHeight: 1.5 }}>
+                URL direta: <strong>/admin</strong> ou <strong>#admin</strong> no fim do endereço do site. Se a página abrir em branco ao atualizar, publique de novo com o ficheiro <code style={{ fontSize: '0.85em' }}>vercel.json</code> na raiz do projeto.
               </Typography>
-              {adminPinRequired && (
-                <TextField
-                  fullWidth
-                  type="password"
-                  label="PIN de acesso"
-                  value={adminLoginPin}
-                  onChange={(e) => setAdminLoginPin(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && adminLoginPin.trim() === adminPinEnv) {
-                      setAdminAuthed(true);
-                      setAdminLoginPin('');
-                    }
-                  }}
-                  sx={{ mb: 2 }}
-                  autoComplete="current-password"
-                />
+              {useSupabaseAdminAuth && !adminAuthReady ? (
+                <Box sx={{ mb: 2 }}>
+                  <LinearProgress sx={{ borderRadius: 1, height: 4 }} />
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, fontWeight: 600 }}>
+                    Verificando se já existe uma sessão…
+                  </Typography>
+                </Box>
+              ) : null}
+              {useSupabaseAdminAuth ? (
+                <>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Entre com o e-mail e a senha do usuário admin criado no Supabase (Auth → Users).
+                    No Dashboard, habilite o provedor <strong>Email</strong> e ajuste Site URL / Redirect
+                    URLs para o domínio do site. Magic link funciona com as mesmas variáveis; aqui o fluxo
+                    implementado é e-mail + senha.
+                  </Typography>
+                  {supabaseLoginError ? (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      {supabaseLoginError}
+                    </Alert>
+                  ) : null}
+                  <TextField
+                    fullWidth
+                    type="email"
+                    label="E-mail"
+                    name="admin-email"
+                    value={adminAuthEmail}
+                    onChange={(e) => setAdminAuthEmail(e.target.value)}
+                    sx={{ mb: 2 }}
+                    autoComplete="username"
+                  />
+                  <TextField
+                    fullWidth
+                    type="password"
+                    label="Senha"
+                    name="admin-password"
+                    value={adminAuthPassword}
+                    onChange={(e) => setAdminAuthPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !supabaseLoginLoading) void trySupabaseLogin();
+                    }}
+                    sx={{ mb: 2 }}
+                    autoComplete="current-password"
+                  />
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    disabled={supabaseLoginLoading}
+                    sx={{ bgcolor: '#1f78d1', fontWeight: 800, py: 1.5, mb: 1, borderRadius: '14px' }}
+                    onClick={() => void trySupabaseLogin()}
+                  >
+                    {supabaseLoginLoading ? 'Entrando…' : 'Entrar'}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                    {adminPinRequired
+                      ? 'Informe o PIN de acesso do administrador para entrar no painel.'
+                      : 'Nenhum PIN configurado. Clique em "Entrar" para acessar. Para proteger o painel, crie um arquivo .env com VITE_ADMIN_PIN=seu_pin e reinicie o servidor.'}
+                  </Typography>
+                  {adminPinRequired && (
+                    <TextField
+                      fullWidth
+                      type="password"
+                      label="PIN de acesso"
+                      value={adminLoginPin}
+                      onChange={(e) => setAdminLoginPin(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && adminLoginPin.trim() === adminPinEnv) {
+                          setAdminAuthed(true);
+                          setAdminLoginPin('');
+                        }
+                      }}
+                      sx={{ mb: 2 }}
+                      autoComplete="current-password"
+                    />
+                  )}
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    sx={{ bgcolor: '#1f78d1', fontWeight: 800, py: 1.5, mb: 1, borderRadius: '14px' }}
+                    onClick={() => {
+                      if (adminPinRequired) {
+                        if (adminLoginPin.trim() === adminPinEnv) {
+                          setAdminAuthed(true);
+                          setAdminLoginPin('');
+                        } else {
+                          alert('PIN incorreto.');
+                        }
+                      } else {
+                        setAdminAuthed(true);
+                      }
+                    }}
+                  >
+                    {adminPinRequired ? 'Entrar' : 'Acessar painel'}
+                  </Button>
+                </>
               )}
-              <Button
-                fullWidth
-                variant="contained"
-                sx={{ bgcolor: '#0b57d0', fontWeight: 700, py: 1.5, mb: 1 }}
-                onClick={() => {
-                  if (adminPinRequired) {
-                    if (adminLoginPin.trim() === adminPinEnv) {
-                      setAdminAuthed(true);
-                      setAdminLoginPin('');
-                    } else {
-                      alert('PIN incorreto.');
-                    }
-                  } else {
-                    setAdminAuthed(true);
-                  }
-                }}
-              >
-                {adminPinRequired ? 'Entrar' : 'Acessar painel'}
-              </Button>
-              <Button fullWidth variant="text" onClick={() => onNavigate('home')} sx={{ fontWeight: 600 }}>
+              <Button fullWidth variant="text" onClick={() => onNavigate('home')} sx={{ fontWeight: 700 }}>
                 ← Voltar ao site
               </Button>
             </CardContent>
@@ -3333,35 +3625,103 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
   }
 
   return (
-    <div className="min-h-screen bg-[#fdfcff] py-12 pb-32">
-      <div className="container mx-auto px-6 max-w-7xl">
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
-          <Button onClick={() => onNavigate('home')} variant="text" sx={{ color: '#0b57d0', fontWeight: 700 }}>
-            ← Voltar para Home
-          </Button>
-          <Button
-            variant="outlined"
-            color="error"
-            startIcon={<LogOut size={18} />}
-            onClick={() => {
-              setAdminAuthed(false);
-              onNavigate('home');
-            }}
-            sx={{ fontWeight: 700, borderRadius: 2 }}
-          >
-            Sair do painel
-          </Button>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-[#12c5d7] via-[#168bd8] to-[#236de0] p-3 sm:p-6">
+      <div className="mx-auto flex max-w-[1500px] overflow-hidden rounded-[26px] bg-white shadow-[0_34px_110px_rgba(21,65,128,0.32)] ring-1 ring-white/35">
+        <aside className="hidden w-72 shrink-0 flex-col bg-[#284574] text-white lg:flex">
+          <div className="border-b border-white/10 p-7 text-center">
+            <div className="mx-auto mb-3 flex h-24 w-24 items-center justify-center rounded-full border-[5px] border-white/20 bg-[#ff8bd2] shadow-[0_16px_40px_rgba(0,0,0,0.16)]">
+              <Database size={42} />
+            </div>
+            <p className="m-0 text-lg font-black">Admin Cultural</p>
+            <p className="m-0 mt-1 text-xs font-bold text-white/60">Ilhabela SP</p>
+          </div>
+          <nav className="flex-1 space-y-1 p-4">
+            {adminSidebarItems.map((item) => (
+              <button
+                key={item.tab}
+                type="button"
+                onClick={() => switchAdminTab(item.tab)}
+                className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
+                  tabValue === item.tab ? 'bg-white/16 text-white shadow-inner' : 'text-white/72 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/18 bg-white/8 text-xs">{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
+          </nav>
+          <div className="space-y-2 border-t border-white/10 p-4">
+            <button
+              type="button"
+              onClick={() => onNavigate('home')}
+              className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold text-white/72 transition hover:bg-white/10 hover:text-white"
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/18 bg-white/8 text-xs">←</span>
+              Voltar ao site
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdminAuthed(false);
+                onNavigate('home');
+              }}
+              className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold text-red-100 transition hover:bg-red-500/15"
+            >
+              <LogOut size={17} />
+              Sair do painel
+            </button>
+          </div>
+        </aside>
 
-        <Card sx={{ mb: 4, borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
-          <CardContent sx={{ p: 4 }}>
-            <div className="flex items-center gap-3 mb-6">
-              <Database className="text-[#0b57d0]" size={32} />
+        <section className="min-w-0 flex-1 bg-[#f5f7fc]">
+          <div className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 px-4 py-4 backdrop-blur md:px-7">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div>
-                <h1 className="text-3xl font-black text-[#1b1b1f]">Painel Administrativo</h1>
-                <p className="text-sm text-[#5f5f6a]">Importação e gerenciamento de dados culturais de Ilhabela</p>
+                <p className="m-0 text-[0.68rem] font-black uppercase tracking-[0.18em] text-[#00A38C]">Dashboard</p>
+                <h1 className="m-0 text-2xl font-black tracking-tight text-[#284574] md:text-3xl">Painel Administrativo</h1>
+                <p className="m-0 mt-1 text-sm font-semibold text-slate-500">Importação e gerenciamento de dados culturais de Ilhabela</p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <TextField
+                  size="small"
+                  placeholder="Buscar..."
+                  value={tabValue === 2 ? buscaParticipante : buscaProponente}
+                  onChange={(e) => (tabValue === 2 ? setBuscaParticipante(e.target.value) : setBuscaProponente(e.target.value))}
+                  sx={{ minWidth: { sm: 250 }, '& .MuiOutlinedInput-root': { borderRadius: '14px', bgcolor: '#f5f7fc' } }}
+                />
+                <Button onClick={() => onNavigate('home')} variant="outlined" sx={{ display: { xs: 'inline-flex', lg: 'none' }, borderRadius: '14px', fontWeight: 800 }}>
+                  Voltar
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<Save />}
+                  onClick={saveToServer}
+                  disabled={loading || Object.keys(parsedData).length === 0}
+                  sx={{ bgcolor: '#00A38C', '&:hover': { bgcolor: '#006B5A' }, borderRadius: '14px', fontWeight: 800 }}
+                >
+                  {loading ? 'Salvando...' : 'Salvar'}
+                </Button>
               </div>
             </div>
+          </div>
+
+          <div className="p-4 md:p-7">
+            <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                { label: 'Cadastros', value: totalCadastrosAdmin, color: '#2f86d6' },
+                { label: 'Projetos', value: totalProjetosAdmin, color: '#20c997' },
+                { label: 'Imagens', value: totalImagensAdmin, color: '#ff5ca8' },
+                { label: 'Eventos', value: eventosOrdenadosAdmin.filter((evento) => evento.publicado !== false).length, color: '#f4b740' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-[22px] border border-slate-100 bg-white p-5 shadow-[0_16px_42px_-34px_rgba(24,39,75,0.45)]">
+                  <p className="m-0 text-[0.65rem] font-black uppercase tracking-[0.14em] text-slate-400">{item.label}</p>
+                  <p className="m-0 mt-2 text-3xl font-black tabular-nums" style={{ color: item.color }}>{item.value.toLocaleString('pt-BR')}</p>
+                </div>
+              ))}
+            </div>
+
+            <Card sx={{ mb: 4, borderRadius: '26px', border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 20px 60px -46px rgba(15,23,42,0.65)' }}>
+              <CardContent sx={{ p: { xs: 2.5, md: 4 } }}>
 
             {/* Informação de exemplo de editais */}
             <Box sx={{ mb: 4, p: 3, bgcolor: '#e8f4ff', borderRadius: 2, border: '1px solid #b3d9ff' }}>
@@ -3421,11 +3781,270 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
               </Box>
             </Alert>
 
-            <Tabs value={tabValue} onChange={(e, newValue) => { setTabValue(newValue); setSelectedRows(new Set()); }} sx={{ mb: 4, borderBottom: 1, borderColor: 'divider' }}>
+            <Tabs
+              value={tabValue}
+              onChange={(e, newValue) => switchAdminTab(newValue)}
+              variant="scrollable"
+              scrollButtons="auto"
+              sx={{
+                display: { xs: 'flex', lg: 'none' },
+                mb: 4,
+                '& .MuiTabs-indicator': { display: 'none' },
+                '& .MuiTab-root': {
+                  minHeight: 42,
+                  mr: 1,
+                  borderRadius: '999px',
+                  bgcolor: '#eef3fb',
+                  color: '#52645d',
+                  fontWeight: 800,
+                  textTransform: 'none',
+                },
+                '& .Mui-selected': {
+                  bgcolor: '#284574',
+                  color: '#fff !important',
+                },
+              }}
+            >
               <Tab label="🗺️ Mapeamento 2020" />
               <Tab label="📋 Projetos / Editais" />
               <Tab label="🎭 Análise de Participações" />
+              <Tab label="🖼️ Galeria / Uploads" />
+              <Tab label="📅 Calendário / Eventos" />
             </Tabs>
+
+            {/* ABA: CALENDÁRIO / EVENTOS — eventos publicados no Dashboard */}
+            {tabValue === 4 && (
+              <Box>
+                <Alert severity="info" sx={{ mb: 3 }}>
+                  <strong>📅 Calendário público:</strong> cadastre eventos importantes da cidade para aparecerem no Dashboard do site.
+                  Use o campo "Publicado" para preparar eventos sem exibir imediatamente.
+                </Alert>
+
+                <Paper sx={{ p: 3, mb: 3, borderRadius: 3, border: '1px solid #d7efe3', bgcolor: '#f6fbf7' }}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Título do evento"
+                        value={eventoForm.titulo}
+                        onChange={(e) => setEventoForm((prev) => ({ ...prev, titulo: e.target.value }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <TextField
+                        fullWidth
+                        type="date"
+                        label="Data"
+                        value={eventoForm.data}
+                        onChange={(e) => setEventoForm((prev) => ({ ...prev, data: e.target.value }))}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <TextField
+                        fullWidth
+                        type="time"
+                        label="Hora"
+                        value={eventoForm.hora}
+                        onChange={(e) => setEventoForm((prev) => ({ ...prev, hora: e.target.value }))}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Local"
+                        value={eventoForm.local}
+                        onChange={(e) => setEventoForm((prev) => ({ ...prev, local: e.target.value }))}
+                        placeholder="Ex: Praça das Bandeiras"
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Categoria"
+                        value={eventoForm.categoria}
+                        onChange={(e) => setEventoForm((prev) => ({ ...prev, categoria: e.target.value }))}
+                        placeholder="Cultura, formação, festival..."
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Link"
+                        value={eventoForm.link}
+                        onChange={(e) => setEventoForm((prev) => ({ ...prev, link: e.target.value }))}
+                        placeholder="https://..."
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <TextField
+                        fullWidth
+                        multiline
+                        minRows={3}
+                        label="Descrição"
+                        value={eventoForm.descricao}
+                        onChange={(e) => setEventoForm((prev) => ({ ...prev, descricao: e.target.value }))}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Stack direction="row" alignItems="center" flexWrap="wrap" gap={2}>
+                        <FormControlLabel
+                          control={
+                            <Checkbox
+                              checked={eventoForm.publicado}
+                              onChange={(e) => setEventoForm((prev) => ({ ...prev, publicado: e.target.checked }))}
+                            />
+                          }
+                          label="Publicado no site"
+                        />
+                        <Button variant="contained" startIcon={<Save />} onClick={salvarEventoCidade} sx={{ bgcolor: '#00A38C', '&:hover': { bgcolor: '#006B5A' }, fontWeight: 800 }}>
+                          {editingEventoId ? 'Atualizar evento' : 'Adicionar evento'}
+                        </Button>
+                        {editingEventoId && (
+                          <Button variant="outlined" onClick={resetEventoForm} sx={{ fontWeight: 800 }}>
+                            Cancelar edição
+                          </Button>
+                        )}
+                      </Stack>
+                    </Grid>
+                  </Grid>
+                </Paper>
+
+                {eventosOrdenadosAdmin.length === 0 ? (
+                  <Alert severity="warning">Nenhum evento cadastrado ainda.</Alert>
+                ) : (
+                  <TableContainer component={Paper} sx={{ borderRadius: 3, border: '1px solid #e2e8f0' }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                          <TableCell sx={{ fontWeight: 800 }}>Data</TableCell>
+                          <TableCell sx={{ fontWeight: 800 }}>Evento</TableCell>
+                          <TableCell sx={{ fontWeight: 800 }}>Local</TableCell>
+                          <TableCell sx={{ fontWeight: 800 }}>Status</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 800 }}>Ações</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {eventosOrdenadosAdmin.map((evento) => (
+                          <TableRow key={evento.id} hover>
+                            <TableCell sx={{ fontWeight: 800, color: '#284574' }}>
+                              {new Date(`${evento.data}T00:00:00`).toLocaleDateString('pt-BR')}
+                              {evento.hora && <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, color: '#64748b' }}>{evento.hora}</Typography>}
+                            </TableCell>
+                            <TableCell>
+                              <Typography sx={{ fontWeight: 800 }}>{evento.titulo}</Typography>
+                              <Typography variant="caption" sx={{ color: '#64748b' }}>{evento.categoria || 'Cultura'}</Typography>
+                            </TableCell>
+                            <TableCell>{evento.local || 'Local a confirmar'}</TableCell>
+                            <TableCell>
+                              <Chip
+                                label={evento.publicado === false ? 'Rascunho' : 'Publicado'}
+                                size="small"
+                                sx={{ fontWeight: 800, bgcolor: evento.publicado === false ? '#f1f5f9' : '#dcfce7', color: evento.publicado === false ? '#64748b' : '#166534' }}
+                              />
+                            </TableCell>
+                            <TableCell align="right">
+                              <Stack direction="row" justifyContent="flex-end" gap={1}>
+                                <Tooltip title={evento.publicado === false ? 'Publicar' : 'Despublicar'}>
+                                  <IconButton size="small" onClick={() => toggleEventoPublicado(evento.id)}>
+                                    <Eye size={16} />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Editar">
+                                  <IconButton size="small" onClick={() => editarEventoCidade(evento)}>
+                                    <Edit size={16} />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Excluir">
+                                  <IconButton size="small" color="error" onClick={() => removerEventoCidade(evento.id)}>
+                                    <Trash2 size={16} />
+                                  </IconButton>
+                                </Tooltip>
+                              </Stack>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
+            )}
+
+            {/* ABA: GALERIA / UPLOADS — visível somente no painel administrativo */}
+            {tabValue === 3 && (
+              <Box>
+                <Alert severity="info" sx={{ mb: 3 }}>
+                  <strong>🖼️ Uploads da Galeria:</strong> envie imagens por ano para organizar o acervo público.
+                  Esta opção fica disponível apenas dentro do painel administrativo.
+                </Alert>
+
+                <Paper sx={{ p: 3, mb: 3, borderRadius: 3, border: '1px solid #d7efe3', bgcolor: '#f6fbf7' }}>
+                  <Grid container spacing={2} alignItems="center">
+                    <Grid item xs={12} md={3}>
+                      <TextField
+                        fullWidth
+                        label="Ano das imagens"
+                        type="number"
+                        value={galleryUploadYear}
+                        onChange={(e) => setGalleryUploadYear(e.target.value || String(new Date().getFullYear()))}
+                        inputProps={{ min: 1900, max: 2100 }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Nome do artista (opcional)"
+                        placeholder="Ex.: Maria Silva — aplica-se a todas as fotos deste envio"
+                        value={galleryUploadArtist}
+                        onChange={(e) => setGalleryUploadArtist(e.target.value)}
+                        helperText="Se preencher, aparece na galeria pública como crédito; o nome do ficheiro continua como legenda secundária."
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={5}>
+                      <Button
+                        fullWidth
+                        variant="contained"
+                        component="label"
+                        startIcon={<Upload />}
+                        sx={{ bgcolor: '#00A38C', '&:hover': { bgcolor: '#006B5A' }, py: 1.65, fontWeight: 800 }}
+                      >
+                        Upload de imagens da galeria
+                        <input
+                          ref={fileInputGallery}
+                          type="file"
+                          hidden
+                          multiple
+                          accept="image/*"
+                          onChange={handleGalleryUpload}
+                        />
+                      </Button>
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#52645d' }}>
+                        {galleryUploadedImages.length} imagem(ns) enviada(s) pelo Admin neste navegador.
+                      </Typography>
+                      {galleryUploadMessage && (
+                        <Typography sx={{ mt: 0.75, fontSize: '0.78rem', fontWeight: 700, color: '#006B5A' }}>
+                          {galleryUploadMessage}
+                        </Typography>
+                      )}
+                    </Grid>
+                  </Grid>
+                </Paper>
+
+                <Stack direction="row" flexWrap="wrap" gap={1}>
+                  {Array.from(new Set(galleryUploadedImages.map((image) => image.year))).sort((a, b) => Number(b) - Number(a)).map((year) => (
+                    <Chip
+                      key={year}
+                      label={`${year}: ${galleryUploadedImages.filter((image) => image.year === year).length} imagem(ns)`}
+                      sx={{ bgcolor: '#e8f5ee', color: '#006B5A', fontWeight: 800 }}
+                    />
+                  ))}
+                </Stack>
+              </Box>
+            )}
 
             {/* ABA: MAPEAMENTO 2020 — contém Agentes, Grupos e Espaços */}
             {tabValue === 0 && (
@@ -3460,7 +4079,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                   <strong>Dados já importados sem gênero/raça/PcD?</strong> Use o botão <strong>"🔄 Reprocessar Dados"</strong> no final da página para normalizar campos de diversidade, email, telefone e endereço em TODOS os registros existentes sem reimportar.
                 </Alert>
 
-                <Typography variant="h5" sx={{ mb: 2, fontWeight: 800, color: '#0b57d0', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h5" sx={{ mb: 2, fontWeight: 800, color: '#00A38C', display: 'flex', alignItems: 'center', gap: 1 }}>
                   🗺️ Base Geral do Mapeamento
                 </Typography>
 
@@ -3488,7 +4107,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="outlined"
                     startIcon={<Download />}
                     onClick={() => baixarTemplate('mapeamento')}
-                    sx={{ color: '#0b57d0', borderColor: '#0b57d0' }}
+                    sx={{ color: '#00A38C', borderColor: '#00A38C' }}
                   >
                     Baixar Template
                   </Button>
@@ -3497,7 +4116,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="contained"
                     component="label"
                     startIcon={<Upload />}
-                    sx={{ bgcolor: '#0b57d0', '&:hover': { bgcolor: '#084ba8' } }}
+                    sx={{ bgcolor: '#00A38C', '&:hover': { bgcolor: '#006B5A' } }}
                   >
                     Upload Planilha Excel
                     <input
@@ -3664,7 +4283,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                 <Divider sx={{ my: 4 }} />
 
                 {/* SUB-SEÇÃO: AGENTES CULTURAIS */}
-                <Typography variant="h5" sx={{ mb: 2, fontWeight: 800, color: '#0b57d0', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h5" sx={{ mb: 2, fontWeight: 800, color: '#00A38C', display: 'flex', alignItems: 'center', gap: 1 }}>
                   👤 Agentes Culturais
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -3676,7 +4295,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="outlined"
                     startIcon={<Download />}
                     onClick={() => baixarTemplate('agentes')}
-                    sx={{ color: '#0b57d0', borderColor: '#0b57d0' }}
+                    sx={{ color: '#00A38C', borderColor: '#00A38C' }}
                   >
                     Baixar Template
                   </Button>
@@ -3685,7 +4304,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="contained"
                     component="label"
                     startIcon={<Upload />}
-                    sx={{ bgcolor: '#0b57d0', '&:hover': { bgcolor: '#084ba8' } }}
+                    sx={{ bgcolor: '#00A38C', '&:hover': { bgcolor: '#006B5A' } }}
                   >
                     Upload Planilha de Agentes
                     <input
@@ -3940,7 +4559,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                 <Divider sx={{ my: 4 }} />
 
                 {/* SUB-SEÇÃO: GRUPOS E COLETIVOS */}
-                <Typography variant="h5" sx={{ mb: 2, fontWeight: 800, color: '#0b57d0', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h5" sx={{ mb: 2, fontWeight: 800, color: '#00A38C', display: 'flex', alignItems: 'center', gap: 1 }}>
                   👥 Grupos e Coletivos
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -3952,7 +4571,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="outlined"
                     startIcon={<Download />}
                     onClick={() => baixarTemplate('grupos')}
-                    sx={{ color: '#0b57d0', borderColor: '#0b57d0' }}
+                    sx={{ color: '#00A38C', borderColor: '#00A38C' }}
                   >
                     Baixar Template
                   </Button>
@@ -3961,7 +4580,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="contained"
                     component="label"
                     startIcon={<Upload />}
-                    sx={{ bgcolor: '#0b57d0', '&:hover': { bgcolor: '#084ba8' } }}
+                    sx={{ bgcolor: '#00A38C', '&:hover': { bgcolor: '#006B5A' } }}
                   >
                     Upload Planilha de Grupos
                     <input
@@ -4120,7 +4739,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                 <Divider sx={{ my: 4 }} />
 
                 {/* SUB-SEÇÃO: ESPAÇOS CULTURAIS */}
-                <Typography variant="h5" sx={{ mb: 2, fontWeight: 800, color: '#0b57d0', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h5" sx={{ mb: 2, fontWeight: 800, color: '#00A38C', display: 'flex', alignItems: 'center', gap: 1 }}>
                   🏛️ Espaços Culturais
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
@@ -4132,7 +4751,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="outlined"
                     startIcon={<Download />}
                     onClick={() => baixarTemplate('espacos')}
-                    sx={{ color: '#0b57d0', borderColor: '#0b57d0' }}
+                    sx={{ color: '#00A38C', borderColor: '#00A38C' }}
                   >
                     Baixar Template
                   </Button>
@@ -4141,7 +4760,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="contained"
                     component="label"
                     startIcon={<Upload />}
-                    sx={{ bgcolor: '#0b57d0', '&:hover': { bgcolor: '#084ba8' } }}
+                    sx={{ bgcolor: '#00A38C', '&:hover': { bgcolor: '#006B5A' } }}
                   >
                     Upload Planilha de Espaços
                     <input
@@ -4342,7 +4961,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="outlined"
                     startIcon={<Download />}
                     onClick={() => baixarTemplate('projetos')}
-                    sx={{ color: '#0b57d0', borderColor: '#0b57d0' }}
+                    sx={{ color: '#00A38C', borderColor: '#00A38C' }}
                   >
                     Baixar Template
                   </Button>
@@ -4351,7 +4970,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                     variant="contained"
                     component="label"
                     startIcon={<Upload />}
-                    sx={{ bgcolor: '#0b57d0', '&:hover': { bgcolor: '#084ba8' } }}
+                    sx={{ bgcolor: '#00A38C', '&:hover': { bgcolor: '#006B5A' } }}
                   >
                     Upload Planilha Excel
                     <input
@@ -5072,8 +5691,61 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                             })}
                           </div>
                           <Typography variant="caption" sx={{ mt: 1.5, display: 'block', color: '#6b7280', fontStyle: 'italic' }}>
-                            * Os links direcionam para os resultados oficiais publicados pela Prefeitura de Ilhabela. Use o botão "Renomear / Gerenciar Editais" acima para adicionar ou editar URLs.
+                            * Os links direcionam para os resultados oficiais publicados pela Prefeitura de Ilhabela. Edite as URLs na seção <strong>Gestão de links oficiais</strong> abaixo (ou ao renomear um edital).
                           </Typography>
+                        </Box>
+
+                        <Box sx={{ mt: 2, p: 2, bgcolor: '#fffbeb', borderRadius: 2, border: '1px solid #fde68a' }}>
+                          <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 800, color: '#b45309', display: 'flex', alignItems: 'center', gap: 1 }}>
+                            Gestão de links oficiais (resultado, resumo, diário)
+                          </Typography>
+                          <Typography variant="caption" sx={{ display: 'block', mb: 1.5, color: '#6b7280' }}>
+                            Cole os endereços por edital. Eles aparecem na Home, na Transparência pública (somente leitura) e na grade de pré-visualização acima. A gravação no servidor ocorre ao sair de cada campo.
+                          </Typography>
+                          <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
+                            Em caso de falha de rede, use &quot;Salvar Dados no Servidor&quot; no topo do painel para reenviar o payload completo.
+                          </Alert>
+                          {stats.porEdital.map((ed, idx) => {
+                            const existingLinks = findEditalLinks(ed.nome, customEditalLinks);
+                            const custom = customEditalLinks[ed.nome] || {};
+                            const temLinks = !!(custom.resultado || custom.resumo || custom.diarioOficial || existingLinks?.resultado || existingLinks?.resumo || existingLinks?.diarioOficial);
+                            return (
+                              <Paper key={`admin-link-row-${idx}`} sx={{ p: 2, mb: 1.5, borderRadius: 2, border: temLinks ? '2px solid #10b981' : '1px solid #e0e0e0', bgcolor: 'white', transition: 'all 0.2s' }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e3a5f' }}>
+                                    {ed.nome} ({ed.total} projetos)
+                                  </Typography>
+                                  {temLinks && <Chip label="Links configurados" size="small" sx={{ bgcolor: '#d1fae5', color: '#065f46', fontSize: '0.65rem', height: 20, fontWeight: 600 }} />}
+                                </Box>
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+                                  <TextField
+                                    size="small"
+                                    label="Link resultado"
+                                    defaultValue={custom.resultado || existingLinks?.resultado || ''}
+                                    onBlur={e => saveEditalLink(ed.nome, 'resultado', e.target.value)}
+                                    placeholder="https://ilhabela.sp.gov.br/..."
+                                    sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
+                                  />
+                                  <TextField
+                                    size="small"
+                                    label="Link resumo"
+                                    defaultValue={custom.resumo || existingLinks?.resumo || ''}
+                                    onBlur={e => saveEditalLink(ed.nome, 'resumo', e.target.value)}
+                                    placeholder="https://ilhabela.sp.gov.br/..."
+                                    sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
+                                  />
+                                  <TextField
+                                    size="small"
+                                    label="Diário oficial"
+                                    defaultValue={custom.diarioOficial || existingLinks?.diarioOficial || ''}
+                                    onBlur={e => saveEditalLink(ed.nome, 'diarioOficial', e.target.value)}
+                                    placeholder="https://ilhabela.sp.gov.br/..."
+                                    sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
+                                  />
+                                </Box>
+                              </Paper>
+                            );
+                          })}
                         </Box>
                       </Box>
                     )}
@@ -5191,7 +5863,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                       </Box>
                     )}
 
-                    {/* 📝 RENOMEAR EDITAL + GERENCIAR LINKS */}
+                    {/* 📝 Renomear edital (links em "Gestão de links oficiais" acima) */}
                     <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                       <Button
                         size="small"
@@ -5200,7 +5872,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                         startIcon={<Edit size={14} />}
                         sx={{ textTransform: 'none', fontSize: '0.75rem' }}
                       >
-                        Renomear / Gerenciar Editais
+                        Renomear edital
                       </Button>
                     </Box>
 
@@ -5247,57 +5919,9 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                         </Box>
                         
                         {/* 🔗 Gerenciar links dos editais */}
-                        <Divider sx={{ my: 2 }} />
-                        <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700, color: '#0369a1', display: 'flex', alignItems: 'center', gap: 1 }}>
-                          🔗 Gestão de Links Oficiais dos Editais
+                        <Typography variant="caption" sx={{ display: 'block', mt: 1, color: '#6b7280' }}>
+                          Para editar URLs de resultado, resumo e diário, use a seção <strong>Gestão de links oficiais</strong> (sempre visível acima, junto a Demanda x Oferta).
                         </Typography>
-                        <Typography variant="caption" sx={{ display: 'block', mb: 1.5, color: '#6b7280' }}>
-                          Cole aqui os links oficiais de resultado, resumo e diário oficial de cada edital. Eles aparecerão na tabela "Demanda vs Oferta" da HomePage.
-                        </Typography>
-                        <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
-                          💡 <strong>Dica:</strong> Após inserir os links, clique em "Salvar Dados no Servidor" (acima) para persistir as URLs.
-                        </Alert>
-                        {stats.porEdital.map((ed, idx) => {
-                          const existingLinks = findEditalLinks(ed.nome, customEditalLinks);
-                          const custom = customEditalLinks[ed.nome] || {};
-                          const temLinks = !!(custom.resultado || custom.resumo || custom.diarioOficial || existingLinks?.resultado || existingLinks?.resumo || existingLinks?.diarioOficial);
-                          return (
-                            <Paper key={idx} sx={{ p: 2, mb: 1.5, borderRadius: 2, border: temLinks ? '2px solid #10b981' : '1px solid #e0e0e0', bgcolor: 'white', transition: 'all 0.2s' }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                                <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e3a5f' }}>
-                                  📋 {ed.nome} ({ed.total} projetos)
-                                </Typography>
-                                {temLinks && <Chip label="✅ Links configurados" size="small" sx={{ bgcolor: '#d1fae5', color: '#065f46', fontSize: '0.65rem', height: 20, fontWeight: 600 }} />}
-                              </Box>
-                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
-                                <TextField
-                                  size="small"
-                                  label="📄 Link Resultado"
-                                  defaultValue={custom.resultado || existingLinks?.resultado || ''}
-                                  onBlur={e => saveEditalLink(ed.nome, 'resultado', e.target.value)}
-                                  placeholder="https://ilhabela.sp.gov.br/..."
-                                  sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
-                                />
-                                <TextField
-                                  size="small"
-                                  label="📊 Link Resumo"
-                                  defaultValue={custom.resumo || existingLinks?.resumo || ''}
-                                  onBlur={e => saveEditalLink(ed.nome, 'resumo', e.target.value)}
-                                  placeholder="https://ilhabela.sp.gov.br/..."
-                                  sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
-                                />
-                                <TextField
-                                  size="small"
-                                  label="📰 Diário Oficial"
-                                  defaultValue={custom.diarioOficial || existingLinks?.diarioOficial || ''}
-                                  onBlur={e => saveEditalLink(ed.nome, 'diarioOficial', e.target.value)}
-                                  placeholder="https://ilhabela.sp.gov.br/..."
-                                  sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
-                                />
-                              </Box>
-                            </Paper>
-                          );
-                        })}
                       </Box>
                     )}
 
@@ -5640,23 +6264,6 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                                           onClick={() => {
                                             const updated = [...(parsedData.projetos || [])];
                                             const projeto = { ...updated[realIndex], status: 'Contemplado' };
-                                            // 💰 TRANSFORMAR FAIXA DE VALOR EM VALOR INVESTIDO
-                                            if (!projeto.valor || projeto.valor === 0) {
-                                              if (projeto.faixa) {
-                                                const valorExtraido = extractValorFromFaixa(projeto.faixa);
-                                                if (valorExtraido > 0) {
-                                                  projeto.valor = valorExtraido;
-                                                  console.log(`💰 Valor automático extraído da faixa: R$ ${valorExtraido.toLocaleString('pt-BR')}`);
-                                                }
-                                              }
-                                              if ((!projeto.valor || projeto.valor === 0) && projeto.faixaValor) {
-                                                const valorExtraido = extractValorFromFaixa(projeto.faixaValor);
-                                                if (valorExtraido > 0) {
-                                                  projeto.valor = valorExtraido;
-                                                  console.log(`💰 Valor automático extraído de faixaValor: R$ ${valorExtraido.toLocaleString('pt-BR')}`);
-                                                }
-                                              }
-                                            }
                                             updated[realIndex] = projeto;
                                             const newPD = { ...parsedData, projetos: updated };
                                             setParsedData(newPD);
@@ -6321,7 +6928,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                 size="large"
                 startIcon={<RefreshCw />}
                 onClick={() => window.location.reload()}
-                sx={{ color: '#0b57d0', borderColor: '#0b57d0', fontWeight: 700 }}
+                sx={{ color: '#00A38C', borderColor: '#00A38C', fontWeight: 700 }}
               >
                 Recarregar Página
               </Button>
@@ -6330,37 +6937,37 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
             {/* Resumo dos dados importados */}
             <Box sx={{ mt: 4, p: 3, bgcolor: '#f5f9ff', borderRadius: 2 }}>
               <Typography variant="h6" sx={{ mb: 2, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Info size={20} className="text-[#0b57d0]" />
+                <Info size={20} className="text-[#00A38C]" />
                 Resumo dos Dados Importados
               </Typography>
               <div className="grid grid-cols-2 md:grid-cols-6 gap-6">
                 <div>
                   <Typography variant="body2" color="text.secondary">Base Geral</Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#0b57d0' }}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#00A38C' }}>
                     {(parsedData.agentes?.length || 0) + (parsedData.grupos?.length || 0) + (parsedData.espacos?.length || 0)}
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="body2" color="text.secondary">Agentes</Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#0b57d0' }}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#00A38C' }}>
                     {parsedData.agentes?.length || 0}
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="body2" color="text.secondary">Grupos</Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#0b57d0' }}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#00A38C' }}>
                     {parsedData.grupos?.length || 0}
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="body2" color="text.secondary">Espaços</Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#0b57d0' }}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#00A38C' }}>
                     {parsedData.espacos?.length || 0}
                   </Typography>
                 </div>
                 <div>
                   <Typography variant="body2" color="text.secondary">Projetos</Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#0b57d0' }}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, color: '#00A38C' }}>
                     {parsedData.projetos?.length || 0}
                   </Typography>
                 </div>
@@ -6372,8 +6979,10 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed }: AdminPage
                 </div>
               </div>
             </Box>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
       </div>
     </div>
   );

@@ -1,5 +1,9 @@
 // Dados estáticos embutidos no build — gerados automaticamente dos editais oficiais.
 // Atualize rodando o script de extração sempre que houver novos contemplados.
+//
+// Mapeamento Cultural 2020 (WordPress WXR): regenere com
+//   node scripts/wxr-build-mapeamento-json.mjs
+import mapeamento2020Wordpress from './mapeamento-2020-wordpress.json';
 
 export type DadosEstatisticosPayload = {
   agentes: any[];
@@ -817,5 +821,5 @@ export const DADOS_ESTATICOS: DadosEstatisticosPayload = {
       "_anoOrigem": 2024
     }
   ],
-  "mapeamento": []
+  "mapeamento": mapeamento2020Wordpress as any[]
 };

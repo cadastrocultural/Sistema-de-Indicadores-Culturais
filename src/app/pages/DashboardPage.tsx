@@ -21,13 +21,19 @@ import {
   formatBRL, getTipoDoc, ProjetoPNAB 
 } from '../data/pnab-data';
 import { MAPEAMENTO_2020, STATS_MAPEAMENTO, AgenteCultural } from '../data/mapeamento-data';
+import { DADOS_ESTATICOS } from '../data/dados-estaticos';
 import {
   canonicalBairroIlhabela,
   coordsTemPinNoMapaIlhabela,
   looksLikeEnderecoCompleto,
   resolveCoordsForIlhabela,
 } from '../data/bairros-coords';
-import { normalizeProjetosOnParsed, pickRicherCadastroPayload } from './admin/projetosDemandaOferta';
+import {
+  getProjetoValorNormalizado,
+  isProjetoContempladoParaEstatistica,
+  normalizeProjetosOnParsed,
+} from './admin/projetosDemandaOferta';
+import { buildCadastroUnionRows } from '../data/estatisticas-publicas';
 import {
   diversityFieldsFromRaw,
   itemIsLgbtqia,
@@ -39,12 +45,12 @@ import { AdminImportCharts } from '../components/admin/AdminImportCharts';
 // Importar a imagem de fundo cultural
 import bgImage from 'figma:asset/610c65fe18e207741b10ac500c3b0999ca3b1aaf.png';
 
-// --- PALETA DE CORES (Atualizada para Azul Institucional) ---
+// --- PALETA DE CORES (Paleta institucional Cadastro Cultural) ---
 const THEME_COLORS = {
-  primary: "#0b57d0",      // Azul Principal
-  secondary:  "#4285f4",   // Azul Claro
+  primary: "#006B5A",
+  secondary:  "#00A38C",
   accent:     "#FFC857",   // Amarelo
-  danger:    "#E30613",    // Vermelho
+  danger:    "#D97706",
   gray:       "#CFD8DC",
   white:      "#FFFFFF",
   green:      "#00A38C",   // Verde para Mapeamento
@@ -142,6 +148,33 @@ const normalizeCoordsByBairro = (
 ): { lat: number | null; lng: number | null } =>
   resolveCoordsForIlhabela(bairro, latRaw, lngRaw, enderecoCompleto);
 
+const normCategoriaKey = (v: unknown) =>
+  String(v ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const canonicalCategoriaCultural = (raw: unknown): string => {
+  const n = normCategoriaKey(raw);
+  if (!n || n === 'nao informado' || n === 'sem categoria' || n === 'outros') return '';
+  if (n.includes('musica') || n.includes('musical') || n.includes('canto') || n.includes('coral')) return 'Música';
+  if (n.includes('artesan')) return 'Artesanato';
+  if (n.includes('caicara') || n.includes('tradicion') || n.includes('patrimonio') || n.includes('memoria') || n.includes('saber')) return 'Cultura Caiçara';
+  if (n.includes('visual') || n.includes('fotografia') || n.includes('pintura') || n.includes('desenho') || n.includes('escultura') || n.includes('grafite')) return 'Artes Visuais';
+  if (n.includes('audiovisual') || n.includes('cinema') || n.includes('video') || n.includes('documentario') || n.includes('podcast')) return 'Audiovisual';
+  if (n.includes('danca') || n.includes('capoeira')) return 'Dança';
+  if (n.includes('literatura') || n.includes('livro') || n.includes('leitura') || n.includes('poesia') || n.includes('conto')) return 'Literatura';
+  if (n.includes('imaterial')) return 'Patrimônio Imaterial';
+  if (n.includes('cenic') || n.includes('teatro') || n.includes('circo') || n.includes('performance')) return 'Artes Cênicas';
+  if (n.includes('agente')) return 'Agentes Culturais';
+  if (n.includes('grupo') || n.includes('coletivo')) return 'Grupos e Coletivos';
+  if (n.includes('espaco') || n.includes('centro cultural') || n.includes('salao') || n.includes('ateli')) return 'Espaços Culturais';
+  return '';
+};
+
 export function DashboardPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [tabValue, setTabValue] = useState(0); // 0 = Mapeamento, 1 = Projetos Aprovados, 2 = Grupos, 3 = Espaços, 4 = Todos os Inscritos
@@ -153,7 +186,7 @@ export function DashboardPage() {
     // 🎯 CARREGA DADOS DO SERVIDOR (primário) com fallback para localStorage
     const loadData = async () => {
       try {
-        const { projectId, publicAnonKey } = await import('/utils/supabase/info');
+        const { projectId, publicAnonKey } = await import('../../lib/supabaseProjectInfo');
         const serverUrl = `https://${projectId}.supabase.co/functions/v1/make-server-2320c79f/load-data`;
         const response = await fetch(serverUrl, {
           method: 'GET',
@@ -166,15 +199,8 @@ export function DashboardPage() {
           const result = await response.json();
           if (result.success && result.data) {
             const normalized = normalizeProjetosOnParsed(result.data);
-            let merged: Record<string, unknown> = normalized as Record<string, unknown>;
-            try {
-              const loc = localStorage.getItem('editais_imported_data');
-              if (loc) merged = pickRicherCadastroPayload(normalized, JSON.parse(loc)) as Record<string, unknown>;
-            } catch {
-              /* mantém servidor */
-            }
-            setImportedData(merged);
-            localStorage.setItem('editais_imported_data', JSON.stringify(merged));
+            setImportedData(normalized);
+            localStorage.setItem('editais_imported_data', JSON.stringify(normalized));
             console.log('📦 [Dashboard] Dados carregados do SERVIDOR:', {
               agentes: result.data.agentes?.length || 0,
               grupos: result.data.grupos?.length || 0,
@@ -204,6 +230,17 @@ export function DashboardPage() {
       } catch (err) {
         console.error('❌ Erro ao carregar dados do localStorage:', err);
       }
+      setImportedData((prev: any) => {
+        if (prev && (prev.mapeamento?.length || prev.agentes?.length || prev.projetos?.length)) return prev;
+        return normalizeProjetosOnParsed({
+          ...prev,
+          mapeamento: DADOS_ESTATICOS.mapeamento || [],
+          agentes: prev?.agentes || [],
+          grupos: prev?.grupos || [],
+          espacos: prev?.espacos || [],
+          projetos: prev?.projetos || [],
+        });
+      });
     };
     
     loadData();
@@ -221,40 +258,33 @@ export function DashboardPage() {
 
   // Unifica dados do Mapeamento 2020 e Editais PNAB
   const todosItens = useMemo((): ItemCultural[] => {
-    // Prioriza mapeamento importado/editável do Admin; fallback para base estática.
-    const baseMapeamentoRaw =
+    const rawM =
       importedData.mapeamento && Array.isArray(importedData.mapeamento) && importedData.mapeamento.length > 0
         ? importedData.mapeamento
-        : MAPEAMENTO_2020;
+        : DADOS_ESTATICOS.mapeamento?.length
+          ? (DADOS_ESTATICOS.mapeamento as any[])
+          : (MAPEAMENTO_2020 as any[]);
+    const rawA = importedData.agentes || [];
+    const rawG = importedData.grupos || [];
+    const rawE = importedData.espacos || [];
+    const unionRows = buildCadastroUnionRows(rawM, rawA, rawG, rawE);
 
-    // Deduplicação defensiva para evitar repetição no painel.
-    const normalizeKey = (v: any) =>
-      String(v || '')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .trim();
-
-    const seenMapeamento = new Set<string>();
-    const baseMapeamento = baseMapeamentoRaw.filter((a: any) => {
-      const cpf = String(a.cpf || a.cpf_cnpj || a.cnpj || '').replace(/\D/g, '');
-      const nome = normalizeKey(a.nome || a.Nome || '');
-      const bairro = normalizeKey(a.bairro || a.Bairro || '');
-      const key = cpf ? `cpf:${cpf}` : `nome:${nome}|bairro:${bairro}`;
-      if (!key || key === 'nome:|bairro:') return true;
-      if (seenMapeamento.has(key)) return false;
-      seenMapeamento.add(key);
-      return true;
-    });
-
-    const itensMapeamento: ItemCultural[] = baseMapeamento.map((a: any, idx: number) => {
+    const itensMapeamento: ItemCultural[] = unionRows.map((u, idx: number) => {
+      const a = u.row;
       const endM = String(a.enderecoCompleto || a['Endereço completo'] || '').trim();
       const coords = normalizeCoordsByBairro(a.bairro || a.Bairro, a.lat, a.lng, endM);
       const div = diversityFieldsFromRaw(a);
       const bLabel = bairroLabelParaPainel(a.bairro || a.Bairro, endM);
+      const tipoRow = u.tipo;
+      const editalDefault =
+        tipoRow === 'grupo'
+          ? 'Edital de Grupos e Coletivos'
+          : tipoRow === 'espaco'
+            ? 'Edital de Espaços Culturais'
+            : 'Mapeamento 2020';
       return {
-        id: idx + 1, // Usa índice sequencial único ao invés de a.id que pode ter duplicatas
-        tipo: 'mapeamento' as const,
+        id: idx + 1,
+        tipo: tipoRow,
         ano: a.ano || 2020,
         nome: a.nome || a.Nome || 'Sem nome',
         proponente: a.nome || a.Nome || 'Sem nome',
@@ -263,9 +293,9 @@ export function DashboardPage() {
         lat: coords.lat,
         lng: coords.lng,
         enderecoCompleto: endM,
-        edital: a.edital_contemplado || 'Mapeamento 2020',
+        edital: a.edital_contemplado || a.edital || editalDefault,
         eh_contemplado: a.eh_contemplado,
-        comunidadeTradicional: div.comunidadeTradicional,
+        comunidadeTradicional: div.comunidadeTradicional || String(a.comunidadeTradicional || ''),
         genero: div.genero,
         genero_sexo: div.genero_sexo,
         identidade_genero: div.identidade_genero,
@@ -278,101 +308,7 @@ export function DashboardPage() {
 
     const itensEditais: ItemCultural[] = [];
 
-    // 🎯 ADICIONA AGENTES, GRUPOS E ESPAÇOS IMPORTADOS DO LOCALSTORAGE
     const itensImportados: ItemCultural[] = [];
-    
-    // Agentes culturais importados
-    if (importedData.agentes && Array.isArray(importedData.agentes)) {
-      importedData.agentes.forEach((a: any, idx: number) => {
-        const endA = String(a.enderecoCompleto || '').trim();
-        const coords = normalizeCoordsByBairro(a.bairro || '', a.lat, a.lng, endA);
-        const div = diversityFieldsFromRaw(a);
-        itensImportados.push({
-          id: 20000 + idx,
-          tipo: 'agente',
-          ano: a.ano || 2020,
-          nome: a.nome,
-          proponente: a.nome,
-          categoria: a.categoria || 'Não informado',
-          bairro: bairroLabelParaPainel(a.bairro, endA),
-          lat: coords.lat,
-          lng: coords.lng,
-          enderecoCompleto: endA,
-          edital: a.edital_contemplado || a.edital || 'Edital de Agentes Culturais',
-          eh_contemplado: a.eh_contemplado || false,
-          comunidadeTradicional: div.comunidadeTradicional || String(a.comunidadeTradicional || ''),
-          genero: div.genero,
-          genero_sexo: div.genero_sexo,
-          identidade_genero: div.identidade_genero,
-          raca: div.raca,
-          orientacao_sexual: div.orientacao_sexual,
-          idade: div.idade,
-          deficiencia: div.deficiencia,
-        });
-      });
-    }
-    
-    // Grupos e coletivos importados
-    if (importedData.grupos && Array.isArray(importedData.grupos)) {
-      importedData.grupos.forEach((g: any, idx: number) => {
-        const endG = String(g.enderecoCompleto || '').trim();
-        const coords = normalizeCoordsByBairro(g.bairro || '', g.lat, g.lng, endG);
-        const div = diversityFieldsFromRaw(g);
-        itensImportados.push({
-          id: 30000 + idx,
-          tipo: 'grupo',
-          ano: g.ano || 2020,
-          nome: g.nome,
-          proponente: g.nome,
-          categoria: g.categoria || 'Grupos e Coletivos',
-          bairro: bairroLabelParaPainel(g.bairro, endG),
-          lat: coords.lat,
-          lng: coords.lng,
-          enderecoCompleto: endG,
-          edital: g.edital_contemplado || g.edital || 'Edital de Grupos e Coletivos',
-          eh_contemplado: g.eh_contemplado || false,
-          comunidadeTradicional: div.comunidadeTradicional || String(g.comunidadeTradicional || ''),
-          genero: div.genero,
-          genero_sexo: div.genero_sexo,
-          identidade_genero: div.identidade_genero,
-          raca: div.raca,
-          orientacao_sexual: div.orientacao_sexual,
-          idade: div.idade,
-          deficiencia: div.deficiencia,
-        });
-      });
-    }
-    
-    // Espaços culturais importados
-    if (importedData.espacos && Array.isArray(importedData.espacos)) {
-      importedData.espacos.forEach((e: any, idx: number) => {
-        const endE = String(e.enderecoCompleto || '').trim();
-        const coords = normalizeCoordsByBairro(e.bairro || '', e.lat, e.lng, endE);
-        const div = diversityFieldsFromRaw(e);
-        itensImportados.push({
-          id: 40000 + idx,
-          tipo: 'espaco',
-          ano: e.ano || 2020,
-          nome: e.nome,
-          proponente: e.nome,
-          categoria: e.categoria || 'Espaços Culturais',
-          bairro: bairroLabelParaPainel(e.bairro, endE),
-          lat: coords.lat,
-          lng: coords.lng,
-          enderecoCompleto: endE,
-          edital: e.edital_contemplado || e.edital || 'Edital de Espaços Culturais',
-          eh_contemplado: e.eh_contemplado || false,
-          comunidadeTradicional: div.comunidadeTradicional || String(e.comunidadeTradicional || ''),
-          genero: div.genero,
-          genero_sexo: div.genero_sexo,
-          identidade_genero: div.identidade_genero,
-          raca: div.raca,
-          orientacao_sexual: div.orientacao_sexual,
-          idade: div.idade,
-          deficiencia: div.deficiencia,
-        });
-      });
-    }
 
     // Projetos/Editais importados
     if (importedData.projetos && Array.isArray(importedData.projetos)) {
@@ -438,10 +374,9 @@ export function DashboardPage() {
         ).trim();
         const coords = normalizeCoordsByBairro(String(bairro), p.lat, p.lng, endP);
         const edital = getField('edital', 'Edital', 'editalNome', 'nome_edital') || 'Edital Importado';
-        const statusRaw = (getField('status', 'Status', 'situacao', 'resultado') || '').toLowerCase();
-        const ehContemplado = statusRaw.includes('contemplado') || statusRaw.includes('aprovado') || statusRaw.includes('classificado') || statusRaw.includes('selecionado');
-        const valorRaw = getField('valor', 'Valor', 'value', 'Valor (R$)');
-        const valor = parseBRLValue(valorRaw);
+        const projetoNormalizado = { ...p, edital, ano: parseInt(getField('ano', 'Ano') || '2020') || 2020 };
+        const ehContemplado = isProjetoContempladoParaEstatistica(projetoNormalizado);
+        const valor = ehContemplado ? getProjetoValorNormalizado(projetoNormalizado) : 0;
         const div = diversityFieldsFromRaw(p);
 
         itensImportados.push({
@@ -502,7 +437,7 @@ export function DashboardPage() {
   const filteredItems = useMemo(() => {
     return todosItens.filter(item => {
       const matchAno = !fAno || excelSerialToYear(item.ano).toString() === fAno;
-      const matchCat = !fCategoria || item.categoria === fCategoria;
+      const matchCat = !fCategoria || canonicalCategoriaCultural(item.categoria) === fCategoria;
       const matchBairro = !fBairro || item.bairro === fBairro;
       const matchEdital = !fEdital || (item.edital && item.edital.toLowerCase().includes(fEdital.toLowerCase()));
       const matchQ = !fQ || 
@@ -512,7 +447,7 @@ export function DashboardPage() {
       // 🎯 ATUALIZADO: Agora mostra TODOS os tipos no mapeamento
       if (tabValue === 0) {
         // Mapeamento mostra: mapeamento + agentes + grupos + espaços importados
-        const isMapeamentoTab = item.tipo === 'mapeamento' || item.tipo === 'agente' || item.tipo === 'grupo' || item.tipo === 'espaco';
+        const isMapeamentoTab = item.tipo === 'agente' || item.tipo === 'grupo' || item.tipo === 'espaco';
         return isMapeamentoTab && matchAno && matchCat && matchBairro && matchEdital && matchQ;
       } else {
         // Editais mostra apenas projetos de editais
@@ -521,14 +456,23 @@ export function DashboardPage() {
     });
   }, [todosItens, fAno, fCategoria, fBairro, fEdital, fQ, tabValue]);
 
+  const categoriasCulturaisFiltradas = useMemo(() => {
+    const set = new Set<string>();
+    filteredItems.forEach((item) => {
+      const categoria = canonicalCategoriaCultural(item.categoria);
+      if (categoria) set.add(categoria);
+    });
+    return set;
+  }, [filteredItems]);
+
   // 🎯 FUNÇÃO PARA COR DO MARCADOR COM BASE NO TIPO
   const getMarkerColor = (tipo: string) => {
     switch(tipo) {
       case 'agente': return '#00A38C'; // Verde para Agentes
-      case 'grupo': return '#0b57d0'; // Azul para Grupos
-      case 'espaco': return '#FF6B35'; // Laranja para Espaços
+      case 'grupo': return '#2ED6A3'; // Mint para Grupos
+      case 'espaco': return '#F2B84B'; // Amarelo para Espaços
       case 'mapeamento': return '#00A38C'; // Verde para Mapeamento 2020
-      case 'edital': return '#0b57d0'; // Azul para Editais
+      case 'edital': return '#006B5A'; // Verde profundo para Editais
       default: return '#757575'; // Cinza padrão
     }
   };
@@ -555,7 +499,10 @@ export function DashboardPage() {
    * Mantém a contagem real e espalha discretamente os pontos sobrepostos no mapa.
    */
   const mapPoints = useMemo(() => {
-    const base = filteredItems.filter((i) => itemTemCoordenadasMapa(i));
+    const base = filteredItems.filter((i) => {
+      if (!itemTemCoordenadasMapa(i)) return false;
+      return i.tipo !== 'edital' || Boolean(i.eh_contemplado);
+    });
     const seen = new globalThis.Map<string, number>();
     return base.map((item) => {
       const key = `${Number(item.lat).toFixed(5)}|${Number(item.lng).toFixed(5)}`;
@@ -732,6 +679,31 @@ export function DashboardPage() {
 
   const currentDatasetName = tabValue === 0 ? 'Mapeamento Cultural 2020' : 'Editais (PNAB, Aldir Blanc, etc)';
   const currentColor = tabValue === 0 ? THEME_COLORS.green : THEME_COLORS.primary;
+  const eventosPublicos = Array.isArray(importedData.eventosCidade)
+    ? importedData.eventosCidade
+        .filter((evento: any) => evento?.publicado !== false && evento?.titulo && evento?.data)
+        .sort((a: any, b: any) => `${a.data} ${a.hora || ''}`.localeCompare(`${b.data} ${b.hora || ''}`))
+    : [];
+  const proximosEventos = eventosPublicos.filter((evento: any) => {
+    const eventDate = new Date(`${evento.data}T23:59:59`);
+    return Number.isFinite(eventDate.getTime()) && eventDate >= new Date();
+  });
+  const eventosParaCalendario = (proximosEventos.length > 0 ? proximosEventos : eventosPublicos).slice(0, 6);
+  const calendarioMesReferencia = eventosParaCalendario[0]?.data ? new Date(`${eventosParaCalendario[0].data}T00:00:00`) : new Date();
+  const calendarDays = (() => {
+    const year = calendarioMesReferencia.getFullYear();
+    const month = calendarioMesReferencia.getMonth();
+    const first = new Date(year, month, 1);
+    const startOffset = first.getDay();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const out: Array<{ day: number | null; hasEvent?: boolean }> = [];
+    for (let i = 0; i < startOffset; i++) out.push({ day: null });
+    for (let day = 1; day <= totalDays; day++) {
+      const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      out.push({ day, hasEvent: eventosPublicos.some((evento: any) => evento.data === iso) });
+    }
+    return out;
+  })();
 
   return (
     <div className="relative min-h-screen pb-20 font-sans text-[#1b1b1f] ds-dash-page">
@@ -753,7 +725,7 @@ export function DashboardPage() {
             </div>
 
             {/* Título Hero */}
-            <h1 className="ds-heading-hero text-[#0b57d0] mb-4">
+            <h1 className="ds-heading-hero mb-4 text-[#006B5A]">
               Painel Unificado de Transparência
             </h1>
 
@@ -773,17 +745,17 @@ export function DashboardPage() {
                 className="ds-btn-primary ds-interactive"
                 variant="contained" 
                 sx={{ 
-                  bgcolor: 'rgba(11, 87, 208, 0.9)', 
+                  bgcolor: 'rgba(0, 163, 140, 0.95)', 
                   backdropFilter: 'blur(10px)',
                   fontWeight: 800, 
                   borderRadius: '14px', 
                   textTransform: 'none', 
                   px: 4,
                   py: 1.5, 
-                  boxShadow: '0 4px 12px rgba(11, 87, 208, 0.25)',
+                  boxShadow: '0 4px 12px rgba(0, 107, 90, 0.22)',
                   '&:hover': { 
-                    bgcolor: 'rgba(11, 87, 208, 1)',
-                    boxShadow: '0 8px 20px rgba(11, 87, 208, 0.35)',
+                    bgcolor: 'rgba(0, 107, 90, 1)',
+                    boxShadow: '0 8px 20px rgba(0, 107, 90, 0.32)',
                     transform: 'translateY(-2px)'
                   } 
                 }}
@@ -809,7 +781,8 @@ export function DashboardPage() {
                   fontWeight: 700, 
                   textTransform: 'none', 
                   fontSize: '1rem', 
-                  py: 2.5 
+                  py: 2.5,
+                  transition: 'color 0.2s ease, background-color 0.2s ease',
                 },
                 '& .Mui-selected': { color: currentColor }
               }}
@@ -817,7 +790,7 @@ export function DashboardPage() {
               <Tab 
                 icon={<Map size={20} />} 
                 iconPosition="start" 
-                label={`🗺️ Mapeamento Cultural 2020 (${todosItens.filter(i => i.tipo === 'mapeamento' || i.tipo === 'agente' || i.tipo === 'grupo' || i.tipo === 'espaco').length} agentes)`} 
+                label={`🗺️ Mapeamento Cultural 2020 (${todosItens.filter((i) => i.tipo !== 'edital').length} cadastros)`} 
               />
               <Tab 
                 icon={<Trophy size={20} />} 
@@ -861,9 +834,9 @@ export function DashboardPage() {
             {
               kicker: tabValue === 0 ? 'Linguagens' : 'Chamadas',
               title: tabValue === 0 ? 'Categorias culturais' : 'Editais registrados',
-              value: tabValue === 0 ? new Set(filteredItems.map(i => i.categoria)).size : editaisUnicosSet.size,
+              value: tabValue === 0 ? categoriasCulturaisFiltradas.size : editaisUnicosSet.size,
               valueClass: 'text-5xl',
-              sub: tabValue === 0 ? 'Áreas de atuação distintas' : 'PEC, PNAB, LPG, Aldir Blanc…',
+              sub: tabValue === 0 ? 'Áreas normalizadas com dados válidos' : 'PEC, PNAB, LPG, Aldir Blanc…',
               icon: <Trophy size={20} />,
             },
           ].map((kpi) => (
@@ -894,6 +867,108 @@ export function DashboardPage() {
               </div>
             </div>
           ))}
+        </section>
+
+        {/* Calendário público de eventos da cidade */}
+        <section className="container mx-auto px-6 mb-10 max-w-5xl">
+          <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+            <div className="grid gap-0 lg:grid-cols-[minmax(0,1.1fr)_360px]">
+              <div className="p-6 md:p-7">
+                <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="m-0 text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: currentColor }}>
+                      Agenda cultural
+                    </p>
+                    <h2 className="m-0 mt-1 text-2xl font-black text-slate-900">Eventos importantes da cidade</h2>
+                    <p className="m-0 mt-2 max-w-2xl text-sm font-semibold text-slate-500">
+                      Calendário alimentado pelo painel administrativo com eventos, formações, encontros e ações culturais.
+                    </p>
+                  </div>
+                  <Chip
+                    icon={<Calendar size={15} />}
+                    label={`${eventosPublicos.length} evento(s) publicado(s)`}
+                    sx={{ bgcolor: `${currentColor}14`, color: currentColor, fontWeight: 800 }}
+                  />
+                </div>
+
+                {eventosParaCalendario.length === 0 ? (
+                  <Alert severity="info" sx={{ borderRadius: 3 }}>
+                    Nenhum evento publicado no momento. Cadastre eventos no Painel Administrativo para exibir a agenda aqui.
+                  </Alert>
+                ) : (
+                  <div className="grid gap-3">
+                    {eventosParaCalendario.map((evento: any) => {
+                      const date = new Date(`${evento.data}T00:00:00`);
+                      const day = Number.isFinite(date.getTime()) ? date.toLocaleDateString('pt-BR', { day: '2-digit' }) : '--';
+                      const month = Number.isFinite(date.getTime()) ? date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '') : '';
+                      return (
+                        <div key={evento.id || `${evento.data}-${evento.titulo}`} className="flex gap-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+                          <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-2xl text-white shadow-sm" style={{ background: `linear-gradient(145deg, ${currentColor}, #284574)` }}>
+                            <span className="text-2xl font-black leading-none">{day}</span>
+                            <span className="mt-1 text-[0.62rem] font-black uppercase tracking-wide">{month}</span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                              <h3 className="m-0 text-base font-black text-slate-900">{evento.titulo}</h3>
+                              <span className="rounded-full bg-white px-2 py-0.5 text-[0.62rem] font-black uppercase tracking-wide text-slate-500">
+                                {evento.categoria || 'Cultura'}
+                              </span>
+                            </div>
+                            <p className="m-0 text-sm font-semibold text-slate-600">
+                              {evento.hora ? `${evento.hora} · ` : ''}{evento.local || 'Local a confirmar'}
+                            </p>
+                            {evento.descricao && (
+                              <p className="m-0 mt-2 text-sm leading-relaxed text-slate-500">{evento.descricao}</p>
+                            )}
+                            {evento.link && (
+                              <a href={evento.link} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex text-xs font-black text-[#006B5A]">
+                                Ver detalhes
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-100 bg-gradient-to-br from-slate-50 to-white p-6 lg:border-l lg:border-t-0">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <p className="m-0 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Calendário</p>
+                    <h3 className="m-0 text-lg font-black text-slate-900">
+                      {calendarioMesReferencia.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                    </h3>
+                  </div>
+                  <Calendar size={24} style={{ color: currentColor }} />
+                </div>
+                <div className="grid grid-cols-7 gap-1.5 text-center">
+                  {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((label, idx) => (
+                    <div key={`${label}-${idx}`} className="py-1 text-[0.65rem] font-black text-slate-400">{label}</div>
+                  ))}
+                  {calendarDays.map((cell, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex h-9 items-center justify-center rounded-xl text-xs font-black ${
+                        cell.day
+                          ? cell.hasEvent
+                            ? 'text-white shadow-sm'
+                            : 'bg-white text-slate-500'
+                          : 'text-transparent'
+                      }`}
+                      style={cell.hasEvent ? { backgroundColor: currentColor } : undefined}
+                    >
+                      {cell.day || 0}
+                    </div>
+                  ))}
+                </div>
+                <p className="m-0 mt-4 text-xs font-semibold leading-relaxed text-slate-500">
+                  Dias destacados indicam eventos publicados no painel administrativo.
+                </p>
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* ── Insights estratégicos (gerados automaticamente dos dados filtrados) ── */}
@@ -1153,7 +1228,7 @@ export function DashboardPage() {
                     <span className="text-xs font-semibold text-gray-700">🎭 Agentes Culturais</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#0b57d0', border: '2px solid white' }}></div>
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#00A38C', border: '2px solid white' }}></div>
                     <span className="text-xs font-semibold text-gray-700">👥 Grupos e Coletivos</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1254,7 +1329,7 @@ export function DashboardPage() {
                 { label: 'Negros/Pardos', value: diversidadeStats.negros, sub: `${diversidadeStats.percNegros}%`, color: '#8B4513', perc: diversidadeStats.percNegros },
                 { label: 'LGBTQIA+', value: diversidadeStats.lgbtqia, sub: `${diversidadeStats.percLgbtqia}%`, color: '#9333ea', perc: diversidadeStats.percLgbtqia },
                 { label: 'Jovens (até 29)', value: diversidadeStats.jovens, sub: `${diversidadeStats.percJovens}%`, color: '#f59e0b', perc: diversidadeStats.percJovens },
-                { label: 'PcD', value: diversidadeStats.pcd, sub: `${diversidadeStats.percPcd}%`, color: '#0b57d0', perc: diversidadeStats.percPcd },
+                { label: 'PcD', value: diversidadeStats.pcd, sub: `${diversidadeStats.percPcd}%`, color: '#00A38C', perc: diversidadeStats.percPcd },
                 { label: 'Com. Trad. (agentes)', value: diversidadeStats.comunidadeTrad, sub: `${diversidadeStats.percComunidade}%`, color: '#00A38C', perc: diversidadeStats.percComunidade },
               ].map((stat) => (
                 <div

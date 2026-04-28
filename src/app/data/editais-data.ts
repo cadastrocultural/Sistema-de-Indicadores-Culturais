@@ -1,3 +1,8 @@
+import {
+  getProjetoValorNormalizado,
+  isProjetoContempladoParaEstatistica,
+} from '../pages/admin/projetosDemandaOferta';
+
 export interface EditalStats {
   id: string;
   nome: string;
@@ -80,14 +85,11 @@ const computeEditaisFromProjetos = (): EditalStats[] => {
   
   editalMap.forEach((projs, nomeEdital) => {
     // Contar contemplados
-    const contemplados = projs.filter((p: any) => {
-      const st = (p.status || p.Status || '').toLowerCase();
-      return st.includes('contemplado') || st.includes('aprovado') || st.includes('classificado') || st.includes('selecionado');
-    });
+    const contemplados = projs.filter(isProjetoContempladoParaEstatistica);
     
     // Somar valores dos contemplados
     const valorTotal = contemplados.reduce((acc: number, p: any) => {
-      return acc + parseBRLValue(p.valor || p.Valor || p.value || p['Valor (R$)'] || 0);
+      return acc + getProjetoValorNormalizado(p);
     }, 0);
     
     // Detectar ano do edital
@@ -122,10 +124,8 @@ const computeCategoriasFromProjetos = (): CategoriaStats[] => {
     if (!cat || cat === '-') return;
     const current = catMap.get(cat) || { qtd: 0, valor: 0 };
     current.qtd += 1;
-    const st = (p.status || p.Status || '').toLowerCase();
-    const isContemp = st.includes('contemplado') || st.includes('aprovado') || st.includes('classificado') || st.includes('selecionado');
-    if (isContemp) {
-      current.valor += parseBRLValue(p.valor || p.Valor || p.value || 0);
+    if (isProjetoContempladoParaEstatistica(p)) {
+      current.valor += getProjetoValorNormalizado(p);
     }
     catMap.set(cat, current);
   });
@@ -143,12 +143,10 @@ const computeEvolucaoFromProjetos = () => {
   
   const anoMap = new Map<number, number>();
   projetos.forEach((p: any) => {
-    const st = (p.status || p.Status || '').toLowerCase();
-    const isContemp = st.includes('contemplado') || st.includes('aprovado') || st.includes('classificado') || st.includes('selecionado');
-    if (!isContemp) return;
+    if (!isProjetoContempladoParaEstatistica(p)) return;
     
     const ano = parseInt(p.ano) || 2020;
-    const valor = parseBRLValue(p.valor || p.Valor || p.value || 0);
+    const valor = getProjetoValorNormalizado(p);
     anoMap.set(ano, (anoMap.get(ano) || 0) + valor);
   });
   

@@ -66,7 +66,7 @@ const tooltipSx = {
   padding: '10px 14px',
 };
 
-const PIE_COLORS = ['#0b57d0', '#4285f4', '#06b6d4', '#8b5cf6', '#db2777', '#059669', '#d97706', '#64748b'];
+const PIE_COLORS = ['#00A38C', '#2ED6A3', '#006B5A', '#F2B84B', '#8b5cf6', '#059669', '#d97706', '#64748b'];
 
 /* ─── Helpers ─── */
 function formatYCategoryNome(v: unknown) {
@@ -109,7 +109,7 @@ function CustomTooltip({ active, payload, label, totalBase }: any) {
       <div className="font-bold text-slate-600 text-[10px] uppercase tracking-wide mb-1.5">{label ?? payload[0]?.name}</div>
       <div className="text-slate-900 font-black text-sm">{val.toLocaleString('pt-BR')} <span className="text-slate-400 text-[11px] font-semibold">registros</span></div>
       {pct && (
-        <div className="mt-1 text-[11px] font-bold" style={{ color: payload[0]?.fill ?? '#0b57d0' }}>
+        <div className="mt-1 text-[11px] font-bold" style={{ color: payload[0]?.fill ?? '#00A38C' }}>
           {pct}% do total
         </div>
       )}
@@ -125,6 +125,108 @@ function RacialPersonIcon({ fill, size = 26 }: { fill: string; size?: number }) 
       <circle cx="13" cy="9.5" r="4" fill={fill} />
       <path d="M5,22 C5,16.5 21,16.5 21,22" fill={fill} />
     </svg>
+  );
+}
+
+type RacialRadialItem = {
+  label: string;
+  value: number;
+  color: string;
+  percentLabel: string;
+  muted?: boolean;
+};
+
+function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
+  const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180;
+  return {
+    x: cx + radius * Math.cos(angleInRadians),
+    y: cy + radius * Math.sin(angleInRadians),
+  };
+}
+
+function describeDonutSegment(cx: number, cy: number, innerRadius: number, outerRadius: number, startAngle: number, endAngle: number) {
+  const outerStart = polarToCartesian(cx, cy, outerRadius, endAngle);
+  const outerEnd = polarToCartesian(cx, cy, outerRadius, startAngle);
+  const innerStart = polarToCartesian(cx, cy, innerRadius, startAngle);
+  const innerEnd = polarToCartesian(cx, cy, innerRadius, endAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 0 ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerStart.x} ${innerStart.y}`,
+    `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 1 ${innerEnd.x} ${innerEnd.y}`,
+    'Z',
+  ].join(' ');
+}
+
+function RacialRadialChart({ items }: { items: RacialRadialItem[] }) {
+  const total = Math.max(1, items.reduce((acc, item) => acc + Math.max(0, Number(item.value) || 0), 0));
+  const cx = 75;
+  const cy = 112;
+  const innerRadius = 33;
+  const outerRadius = 62;
+  const visibleItems = items.filter((item) => item.value > 0);
+  let cursor = -118;
+
+  return (
+    <div className="relative mx-auto h-[230px] w-full max-w-[360px]" style={{ fontFamily: INTER }}>
+      <svg viewBox="0 0 360 230" className="h-full w-full overflow-visible" role="img" aria-label="Distribuição de cor e raça">
+        <circle cx={cx} cy={cy} r={outerRadius + 16} fill="#f8fafc" />
+        <circle cx={cx} cy={cy} r={outerRadius + 8} fill="none" stroke="#dbe4ef" strokeWidth="8" strokeDasharray="5 17" strokeLinecap="round" />
+
+        {visibleItems.map((item, index) => {
+          const sweep = Math.max(8, (Math.max(0, item.value) / total) * 312);
+          const startAngle = cursor;
+          const endAngle = Math.min(212, cursor + sweep);
+          cursor = endAngle + 5;
+          const mid = (startAngle + endAngle) / 2;
+          const dot = polarToCartesian(cx, cy, outerRadius + 10, mid);
+          const lineStart = polarToCartesian(cx, cy, outerRadius + 15, mid);
+          const labelY = 28 + index * 31;
+          const elbowX = index % 2 === 0 ? 128 : 144;
+          const labelX = 188;
+
+          return (
+            <g key={item.label}>
+              <path
+                d={describeDonutSegment(cx, cy, innerRadius, outerRadius, startAngle, endAngle)}
+                fill={item.color}
+                opacity={item.muted ? 0.38 : 0.96}
+              />
+              <circle cx={dot.x} cy={dot.y} r="3.4" fill="#ffffff" stroke={item.color} strokeWidth="2" />
+              <path
+                d={`M ${lineStart.x} ${lineStart.y} C ${elbowX} ${lineStart.y}, ${elbowX - 8} ${labelY}, ${labelX - 30} ${labelY}`}
+                fill="none"
+                stroke={item.muted ? '#cbd5e1' : item.color}
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+              <circle cx={labelX - 30} cy={labelY} r="2.6" fill={item.muted ? '#94a3b8' : item.color} />
+              <g transform={`translate(${labelX - 5} ${labelY - 13})`}>
+                <circle cx="13" cy="13" r="13" fill={item.muted ? '#f1f5f9' : '#ffffff'} stroke={item.muted ? '#cbd5e1' : item.color} strokeWidth="1.8" />
+                <circle cx="13" cy="9.8" r="3.6" fill={item.muted ? '#94a3b8' : item.color} opacity="0.82" />
+                <path d="M6,22 C6,16.8 20,16.8 20,22" fill={item.muted ? '#94a3b8' : item.color} opacity="0.82" />
+              </g>
+              <text x={labelX + 30} y={labelY - 2} fill={item.muted ? '#64748b' : '#334155'} fontSize="10.5" fontWeight="700">
+                {item.label}
+              </text>
+              <text x={330} y={labelY - 2} fill={item.muted ? '#94a3b8' : item.color} fontSize="11" fontWeight="900" textAnchor="end">
+                {item.percentLabel}
+              </text>
+            </g>
+          );
+        })}
+
+        <circle cx={cx} cy={cy} r={innerRadius - 4} fill="#ffffff" />
+        <text x={cx} y={cy - 4} fill="#0f172a" fontSize="18" fontWeight="900" textAnchor="middle">
+          {visibleItems.length}
+        </text>
+        <text x={cx} y={cy + 12} fill="#94a3b8" fontSize="8.5" fontWeight="800" textAnchor="middle" letterSpacing="0.08em">
+          GRUPOS
+        </text>
+      </svg>
+    </div>
   );
 }
 
@@ -185,7 +287,7 @@ function MiniCard({
       }}
     >
       <CardContent className="p-5" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#0b57d0] mb-0.5">{kicker}</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#00A38C] mb-0.5">{kicker}</p>
         <h3 className="text-sm font-black text-[#0f172a] mb-0.5 leading-snug">{title}</h3>
         {subtitle && <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">{subtitle}</p>}
         {!subtitle && <div className="mb-3" />}
@@ -391,6 +493,11 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
     [radarItems]
   );
 
+  const totalRacaDeclarada = useMemo(
+    () => Math.max(0, radarItems.filter((item) => item.label !== 'Outros / NI').reduce((acc, item) => acc + (Number(item.value) || 0), 0)),
+    [radarItems]
+  );
+
   const idadeAbsMax = useMemo(() => {
     const max = idadePiramide.reduce((acc, row) => Math.max(acc, Math.abs(Number(row.homens) || 0), Math.abs(Number(row.mulheres) || 0)), 0);
     return Math.max(10, Math.ceil(max / 10) * 10);
@@ -410,10 +517,11 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
   const insightRaca = useMemo(() => {
     if (!hasAnyQty(data?.raca ?? [])) return undefined;
     const negros = inclusaoModeloDados.etnia.preto + inclusaoModeloDados.etnia.pardo;
-    const pct = (negros / totalBase) * 100;
+    const baseDeclarada = Math.max(1, totalRacaDeclarada);
+    const pct = (negros / baseDeclarada) * 100;
     if (pct < 30) return { level: 'warn' as InsightLevel, text: `Negros/pardos: ${pct.toFixed(0)}% — sub-representação relevante. Considere ações afirmativas nos próximos editais.` };
-    return { level: 'ok' as InsightLevel, text: `Negros/pardos: ${pct.toFixed(0)}% — acima do limiar mínimo de 30%. Continue monitorando.` };
-  }, [data, inclusaoModeloDados, totalBase]);
+    return { level: 'ok' as InsightLevel, text: `Negros/pardos: ${pct.toFixed(0)}% da base com cor/raça declarada. Continue monitorando.` };
+  }, [data, inclusaoModeloDados, totalRacaDeclarada]);
 
   const insightIdade = useMemo(() => {
     if (!hasAnyQty(data?.idadeFaixa ?? [])) return undefined;
@@ -437,7 +545,7 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
     <div className="mt-12">
       {/* Cabeçalho */}
       <div className="mb-7 max-w-3xl">
-        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#0b57d0] mb-1">Painel gráfico</p>
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#00A38C] mb-1">Painel gráfico</p>
         <h3 className="text-xl md:text-2xl font-black tracking-tight text-[#0f172a]">Diversidade cultural e inclusão em gráficos</h3>
         <p className="mt-2 text-sm font-medium text-[#5f5f6a] leading-relaxed max-w-2xl">
           Visualizações a partir do universo de agentes, grupos, espaços e proponentes de editais. Cada gráfico traz um insight direto para subsidiar decisões de política cultural.
@@ -459,12 +567,12 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
           {/* Cabeçalho do card */}
           <div className="flex items-start justify-between flex-wrap gap-3 mb-7">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#0b57d0] mb-1">Perfil agregado</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#00A38C] mb-1">Perfil agregado</p>
               <h3 className="text-xl font-black text-[#0f172a] leading-tight">Diversidade</h3>
               <p className="text-[11px] text-slate-400 mt-0.5" style={{ fontFamily: INTER }}>Cor/raça · Gênero · Faixa etária</p>
             </div>
             <div className="flex items-center gap-2 rounded-full bg-slate-50 border border-slate-100 px-3 py-1.5" style={{ fontFamily: INTER }}>
-              <span className="w-2 h-2 rounded-full bg-[#0b57d0] inline-block opacity-70" />
+              <span className="w-2 h-2 rounded-full bg-[#00A38C] inline-block opacity-70" />
               <span className="text-xs font-bold tabular-nums text-slate-500">
                 {data.totalBase.toLocaleString('pt-BR')} registros
               </span>
@@ -475,67 +583,48 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
 
             {/* ── COL 1: Cor / Raça — donut + lista com ícones de pessoa ── */}
             {(() => {
-              const RACE_COLORS = ['#f59e0b', '#3b82f6', '#22c55e', '#a78bfa', '#374151'];
+              const RACE_COLORS = ['#F2B84B', '#2F80ED', '#00A38C', '#8B5CF6', '#64748B'];
               const declared = radarItems.filter(r => r.value > 0 && r.label !== 'Outros / NI');
               const niVal = radarItems.find(r => r.label === 'Outros / NI')?.value ?? 0;
               const niPct = totalRacaRadar > 0 ? Math.round((niVal / totalRacaRadar) * 100) : 0;
+              const declaredTotal = declared.reduce((acc, item) => acc + (Number(item.value) || 0), 0);
               const hasDeclared = declared.length > 0;
+              const radialItems: RacialRadialItem[] = [
+                ...declared.map((item, i) => {
+                  const pct = declaredTotal > 0 ? Math.round((item.value / declaredTotal) * 100) : 0;
+                  return {
+                    label: item.label,
+                    value: item.value,
+                    color: RACE_COLORS[i % RACE_COLORS.length],
+                    percentLabel: `${pct}%`,
+                  };
+                }),
+                ...(niVal > 0
+                  ? [{
+                      label: 'Não declarado',
+                      value: niVal,
+                      color: '#94a3b8',
+                      percentLabel: `${niPct}% total`,
+                      muted: true,
+                    }]
+                  : []),
+              ];
               return (
                 <div className="flex flex-col">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 text-center">Cor / Raça</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 text-center">Cor / Raça</p>
+                  {hasDeclared && (
+                    <p className="mb-2 text-center text-[10px] font-semibold leading-snug text-slate-400">
+                      Percentual sobre {declaredTotal.toLocaleString('pt-BR')} registro(s) com declaração.
+                    </p>
+                  )}
                   {hasDeclared ? (
                     <>
-                      <div style={{ height: 140, width: '100%' }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={declared}
-                              dataKey="value"
-                              nameKey="label"
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={40}
-                              outerRadius={62}
-                              paddingAngle={2}
-                              isAnimationActive={false}
-                              stroke="#fff"
-                              strokeWidth={2}
-                            >
-                              {declared.map((_, i) => (
-                                <Cell key={i} fill={RACE_COLORS[i % RACE_COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <RechartsTooltip
-                              contentStyle={tooltipSx}
-                              formatter={(val: number, name: string) => [
-                                `${val} (${totalRacaRadar > 0 ? ((val / totalRacaRadar) * 100).toFixed(0) : 0}%)`,
-                                name,
-                              ]}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      {/* Legenda com ícones de pessoa */}
-                      <div className="flex flex-col gap-1 mt-2 px-1" style={{ fontFamily: INTER }}>
-                        {declared.map((item, i) => {
-                          const color = RACE_COLORS[i % RACE_COLORS.length];
-                          const pct = totalRacaRadar > 0 ? Math.round((item.value / totalRacaRadar) * 100) : 0;
-                          return (
-                            <div key={item.label} className="flex items-center gap-2">
-                              <RacialPersonIcon fill={color} size={22} />
-                              <span className="text-[11px] font-semibold text-slate-600 flex-1 leading-none">{item.label}</span>
-                              <span className="text-[11px] font-black tabular-nums" style={{ color }}>{pct}%</span>
-                            </div>
-                          );
-                        })}
-                        {niPct > 0 && (
-                          <div className="flex items-center gap-2 mt-0.5 border-t border-slate-100 pt-1">
-                            <RacialPersonIcon fill="#94a3b8" size={22} />
-                            <span className="text-[11px] font-semibold text-slate-400 flex-1 leading-none">Não declarado</span>
-                            <span className="text-[11px] font-black tabular-nums text-slate-400">{niPct}%</span>
-                          </div>
-                        )}
-                      </div>
+                      <RacialRadialChart items={radialItems} />
+                      {niPct > 0 && (
+                        <p className="-mt-2 text-center text-[9px] font-bold text-slate-400" style={{ fontFamily: INTER }}>
+                          “Não declarado” continua calculado sobre a base total.
+                        </p>
+                      )}
                     </>
                   ) : (
                     <div className="flex flex-col items-center gap-2">
@@ -546,7 +635,7 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
                         <div className="flex items-center gap-2 w-full px-1">
                           <RacialPersonIcon fill="#94a3b8" size={22} />
                           <span className="text-[11px] font-semibold text-slate-400 flex-1">Não declarado</span>
-                          <span className="text-[11px] font-black tabular-nums text-slate-400">{niPct}%</span>
+                          <span className="text-[11px] font-black tabular-nums text-slate-400">{niPct}% da base total</span>
                         </div>
                       )}
                     </div>
@@ -566,7 +655,7 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
                       data={[
                         { n: 'Homens',  v: Math.max(generoResumo.homens, generoResumo.total === 1 ? 0 : 0) },
                         { n: 'Mulheres',v: generoResumo.mulheres },
-                        { n: 'Outros',  v: generoResumo.outros },
+                        { n: 'Não binário / LGBTQIA+',  v: generoResumo.outros },
                       ].filter(d => d.v > 0)}
                       dataKey="v" nameKey="n"
                       startAngle={180} endAngle={0}
@@ -623,7 +712,8 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
                     <div className="text-lg font-black text-slate-400">
                       {Math.round((generoResumo.outros / generoResumo.total) * 100)}%
                     </div>
-                    <div className="text-[10px] font-semibold text-slate-500">Outros</div>
+                    <div className="text-[10px] font-black text-slate-500">LGBTQIA+</div>
+                    <div className="text-[9px] font-semibold leading-tight text-slate-400">Não binário / outro</div>
                   </div>
                 )}
               </div>
@@ -725,7 +815,7 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
             <BarChart data={gGenero} margin={{ top: 18, right: 8, left: 0, bottom: 4 }}>
               <defs>
                 <linearGradient id={`div-g-${chartUid}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#0b57d0" stopOpacity={0.95} />
+                  <stop offset="0%" stopColor="#00A38C" stopOpacity={0.95} />
                   <stop offset="100%" stopColor="#60a5fa" stopOpacity={0.85} />
                 </linearGradient>
               </defs>
@@ -734,7 +824,7 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
               <YAxis width={28} allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} />
               <RechartsTooltip content={<CustomTooltip totalBase={totalBase} />} />
               <Bar dataKey="qtd" name="Registros" fill={`url(#div-g-${chartUid})`} radius={[8, 8, 0, 0]} maxBarSize={40} isAnimationActive={false}>
-                <LabelList dataKey="qtd" position="top" style={{ fontSize: 10, fill: '#0b57d0', fontFamily: INTER, fontWeight: 700 }} />
+                <LabelList dataKey="qtd" position="top" style={{ fontSize: 10, fill: '#00A38C', fontFamily: INTER, fontWeight: 700 }} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -1068,8 +1158,8 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
               <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: '#64748b', fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} />
               <YAxis type="category" dataKey="nome" width={140} tick={{ fontSize: 9, fill: '#475569', fontWeight: 600, fontFamily: INTER }} axisLine={false} tickLine={false} tickFormatter={formatYCategoryNome} />
               <RechartsTooltip contentStyle={tooltipSx} formatter={(v: number | string) => [`${v}%`, '']} />
-              <Bar dataKey="qtd" name="Percentual" fill="#0b57d0" radius={[0, 6, 6, 0]} maxBarSize={18} isAnimationActive={false}>
-                <LabelList dataKey="qtd" position="right" formatter={(v: number) => `${v}%`} style={{ fontSize: 10, fill: '#0b57d0', fontFamily: INTER, fontWeight: 700 }} />
+              <Bar dataKey="qtd" name="Percentual" fill="#00A38C" radius={[0, 6, 6, 0]} maxBarSize={18} isAnimationActive={false}>
+                <LabelList dataKey="qtd" position="right" formatter={(v: number) => `${v}%`} style={{ fontSize: 10, fill: '#00A38C', fontFamily: INTER, fontWeight: 700 }} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
