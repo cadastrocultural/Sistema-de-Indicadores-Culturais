@@ -276,6 +276,11 @@ export function TransparenciaPage() {
     return rows;
   }, [dadosReais]);
 
+  // Totais derivados do breakdown (inclui Aldir Blanc 2020 oficiais) — alinha com a HomePage
+  const totalValorFinal = useMemo(() => breakdownEditais.reduce((a, e) => a + e.valor, 0), [breakdownEditais]);
+  const totalContempladosFinal = useMemo(() => breakdownEditais.reduce((a, e) => a + e.contemplados, 0), [breakdownEditais]);
+  const totalEditaisFinal = breakdownEditais.length;
+
   const breakdownEditaisChart = useMemo(() => {
     return breakdownEditais.map((ed) => {
       const links = resolveEditalLinks(ed.nome, dadosReais.customEditalLinks);
@@ -380,10 +385,14 @@ export function TransparenciaPage() {
     };
   }, [dadosReais.projetos, buscaParticipante]);
 
+  const dispEditais = totalEditaisFinal || stats.totalEditais;
+  const dispValor = totalValorFinal || stats.totalValorInvestido;
+  const dispContemplados = totalContempladosFinal || stats.totalContemplados;
+
   const statsData = [
     { label: 'Inscricoes no Sistema', value: stats.totalInscritos > 0 ? stats.totalInscritos.toString() : '-', sub: 'Historico Acumulado', icon: <Search size={24} /> },
-    { label: 'Contemplados', value: stats.totalContemplados > 0 ? stats.totalContemplados.toString() : '-', sub: `${stats.totalEditais} edital(is)`, icon: <CheckCircle2 size={24} /> },
-    { label: 'Total Investido', value: stats.totalValorInvestido > 0 ? formatBRL(stats.totalValorInvestido) : '-', sub: 'Dados Reais', icon: <TrendingUp size={24} /> },
+    { label: 'Contemplados', value: dispContemplados > 0 ? dispContemplados.toString() : '-', sub: `${dispEditais} edital(is)`, icon: <CheckCircle2 size={24} /> },
+    { label: 'Total Investido', value: dispValor > 0 ? formatBRL(dispValor) : '-', sub: 'Dados Reais', icon: <TrendingUp size={24} /> },
   ];
 
   return (
@@ -404,12 +413,12 @@ export function TransparenciaPage() {
           <div className="grid min-w-0 max-w-full grid-cols-2 gap-2 sm:min-w-[320px]">
             <div className="ds-analytics-stat-card min-w-0 overflow-hidden p-4">
               <p className="m-0 text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-slate-500">Editais</p>
-              <p className="m-0 mt-1 font-mono text-3xl font-semibold tabular-nums text-teal-700">{stats.totalEditais}</p>
+              <p className="m-0 mt-1 font-mono text-3xl font-semibold tabular-nums text-teal-700">{dispEditais}</p>
             </div>
             <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200/90 border-l-amber-500/90 bg-gradient-to-br from-amber-50/90 to-white p-4">
               <p className="m-0 text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-amber-900/80">Investido</p>
               <p className="m-0 mt-1 min-w-0 break-words text-left font-mono text-sm font-semibold leading-snug [overflow-wrap:anywhere] tabular-nums text-amber-950 sm:text-base md:text-lg">
-                {stats.totalValorInvestido > 0 ? formatBRL(stats.totalValorInvestido) : '-'}
+                {dispValor > 0 ? formatBRL(dispValor) : '-'}
               </p>
             </div>
           </div>

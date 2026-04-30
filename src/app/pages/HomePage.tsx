@@ -25,7 +25,7 @@ import {
   normalizeFullPersonNameForRanking,
   withOfficialAldirBlanc2020Context,
 } from './admin/projetosDemandaOferta';
-import { buildCadastroUnionRows, computeEstatisticasPublicas } from '../data/estatisticas-publicas';
+import { buildCadastroUnionRows, cadastroChaveDedupe, computeEstatisticasPublicas } from '../data/estatisticas-publicas';
 import { IlhabelaTerritoryMap } from '../components/maps/IlhabelaTerritoryMap';
 import StoreLocatorMap from '../components/maps/StoreLocatorMap';
 import { InciclePanel } from '../components/dashboard/InciclePanel';
@@ -576,7 +576,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
    * Se dependêssemos só da ausência de localStorage, um cache antigo/parcial mostrava totais errados
    * (ex.: ~76) e depois saltava para os dados do servidor (~965).
    */
-  const showCadastroLoadingShell = isMounted && !remoteDataAttemptDone;
+  /** Sem `isMounted`: no primeiro frame já evita cache local (~76) antes do `load-data` (~965). */
+  const showCadastroLoadingShell = !remoteDataAttemptDone;
 
   const resumoGlobal = useMemo(() => {
     // Carrega dados importados do localStorage
@@ -948,10 +949,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
       return txt.length > 32 ? `${txt.slice(0, 29)}…` : txt;
     };
     
-    // 🎯 Indicadores de diversidade com a MESMA base da página inicial:
-    // apenas cadastros culturais (agentes + grupos + espaços), sem somar linhas de projetos/editais.
+    // 🎯 Indicadores de diversidade: cadastro cultural (união) + cada linha importada nos editais/projetos
+    // (percentuais e o gráfico de cor/raça usam esse universo completo dos dados enviados).
     const todosParaDiversidade = unionCadastro.map((u) => u.row);
-    const baseParaPercentual = todosParaDiversidade.length || 1;
+    const linhasDiversidadeCompleto = [...todosParaDiversidade, ...editaisFinais];
+    const baseParaPercentual = linhasDiversidadeCompleto.length || 1;
     
     /** Mesma regra do Admin: só conta com nome oficial em COMUNIDADES_TRADICIONAIS (evita "Sim" genérico ou a palavra "comunidade" em títulos). */
     const ehComunidadeTradicionalRegistro = (o: any, opts?: { includeNomeProjeto?: boolean }) => {
@@ -1000,13 +1002,16 @@ export function HomePage({ onNavigate }: HomePageProps) {
       return eh;
     };
 
-    const tradCadastroBase = [...agentesFinais, ...gruposImportados, ...espacosImportados].filter((a: any) =>
-      ehComunidadeTradicionalRegistro(a)
-    ).length;
+    const tradCadastroBase = linhasDiversidadeCompleto.filter((a: any) => {
+      const isProj = Boolean(
+        (a as any).nomeProjeto || (a as any).projeto || (a as any)._editalOrigem || (a as any).edital
+      );
+      return ehComunidadeTradicionalRegistro(a, { includeNomeProjeto: isProj });
+    }).length;
     const trad = tradCadastroBase;
     const percTrad = baseParaPercentual > 0 ? Math.round((trad / baseParaPercentual) * 100) : 0;
     
-    const negros = todosParaDiversidade.filter((a: any) => {
+    const negros = linhasDiversidadeCompleto.filter((a: any) => {
       const raca = findFieldValue(a, 'raca', 'etnia', 'autodeclaracao', 'Raça', 'Raça/Cor', 'raca_cor', 'Cor', 'cor').toLowerCase();
       return raca.includes('pret') || raca.includes('pard') || raca.includes('negr') || raca.includes('afro');
     }).length;
@@ -1167,28 +1172,28 @@ export function HomePage({ onNavigate }: HomePageProps) {
       return { isLgbtOrientacao, isLgbtIdGenero, isLgbtGenero };
     };
 
-    const lgbtOrientacaoSexual = todosParaDiversidade.filter((a: any) => lgbtAxesFrom(a).isLgbtOrientacao).length;
+    const lgbtOrientacaoSexual = linhasDiversidadeCompleto.filter((a: any) => lgbtAxesFrom(a).isLgbtOrientacao).length;
     /** Identidade/gênero LGBTQIA+: eixo independente do eixo de orientação sexual. */
-    const lgbtIdentidadeGenero = todosParaDiversidade.filter((a: any) => {
+    const lgbtIdentidadeGenero = linhasDiversidadeCompleto.filter((a: any) => {
       const f = lgbtAxesFrom(a);
       return f.isLgbtIdGenero || f.isLgbtGenero;
     }).length;
-    const lgbtqia = todosParaDiversidade.filter((a: any) => {
+    const lgbtqia = linhasDiversidadeCompleto.filter((a: any) => {
       const f = lgbtAxesFrom(a);
       return f.isLgbtOrientacao || f.isLgbtIdGenero || f.isLgbtGenero;
     }).length;
     
-    const mulheres = todosParaDiversidade.filter((a: any) => {
+    const mulheres = linhasDiversidadeCompleto.filter((a: any) => {
       const genero = findFieldValue(a, 'genero', 'sexo', 'Gênero', 'Sexo', 'identidade_genero').toLowerCase();
       return genero.includes('feminino') || genero.includes('mulher') || genero === 'f' || genero.includes('female');
     }).length;
-    const homens = todosParaDiversidade.filter((a: any) => {
+    const homens = linhasDiversidadeCompleto.filter((a: any) => {
       const genero = findFieldValue(a, 'genero', 'sexo', 'Gênero', 'Sexo', 'identidade_genero').toLowerCase();
       return genero.includes('masculino') || genero.includes('homem') || genero === 'm' || genero.includes('male');
     }).length;
     const percMulheres = baseParaPercentual > 0 ? Math.round((mulheres / baseParaPercentual) * 100) : 0;
     
-    const jovens = todosParaDiversidade.filter((a: any) => {
+    const jovens = linhasDiversidadeCompleto.filter((a: any) => {
       const idadeStr = findFieldValue(a, 'idade', 'faixa_etaria', 'Idade', 'Faixa Etária', 'data_nascimento', 'nascimento');
       const idadeNum = parseInt(idadeStr);
       if (idadeNum > 0 && idadeNum <= 29) return true;
@@ -1207,7 +1212,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       return false;
     }).length;
     
-    const pcd = todosParaDiversidade.filter((a: any) => isPcdDeclaracaoPositivaShared(extractPcdColumnValueShared(a))).length;
+    const pcd = linhasDiversidadeCompleto.filter((a: any) => isPcdDeclaracaoPositivaShared(extractPcdColumnValueShared(a))).length;
 
     const bump = (m: Map<string, number>, k: string, n = 1) => m.set(k, (m.get(k) || 0) + n);
     const mapToArr = (m: Map<string, number>, max = 12) =>
@@ -1254,7 +1259,23 @@ export function HomePage({ onNavigate }: HomePageProps) {
     };
 
     const racaBucket = (a: any): string => {
-      const r = findFieldValue(a, 'raca', 'etnia', 'autodeclaracao', 'Raça', 'Raça/Cor', 'raca_cor', 'Cor', 'cor').toLowerCase().trim();
+      const r = findFieldValue(
+        a,
+        'raca',
+        'etnia',
+        'autodeclaracao',
+        'Raça',
+        'Raça/Cor',
+        'raca_cor',
+        'Cor',
+        'cor',
+        'cor_raca',
+        'corRaca',
+        'Autodeclaração racial',
+        'autodeclaracao_racial',
+        'cor ou raca',
+        'Cor ou raça'
+      ).toLowerCase().trim();
       if (!r) return 'Não informado';
       if (r.includes('pret')) return 'Preta';
       if (r.includes('pard')) return 'Parda';
@@ -1329,7 +1350,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
     };
 
     let diversityCharts: DiversityChartsPayload | null = null;
-    if (todosParaDiversidade.length > 0) {
+    if (linhasDiversidadeCompleto.length > 0) {
       /** Só colunas de orientação sexual — evita misturar raça ou outros textos no gráfico de resumo. */
       const orientacaoClassBucket = (a: any): string => {
         const orientacao = sanitizeOrientacaoSexualValue(
@@ -1372,7 +1393,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       const pcdTipoMap = new Map<string, number>();
       const cpfJaContouEstado = new Set<string>();
 
-      todosParaDiversidade.forEach((a: any) => {
+      linhasDiversidadeCompleto.forEach((a: any) => {
         bump(generoMap, generoBucket(a));
         bump(racaMap, racaBucket(a));
         bump(idadeMap, idadeFaixaBucket(a));
@@ -1555,9 +1576,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
         /* ignore */
       }
 
-      const comTradRegistros = todosParaDiversidade.filter((a: any) => {
-        const isProjeto = editaisFinais.includes(a);
-        return ehComunidadeTradicionalRegistro(a, { includeNomeProjeto: isProjeto });
+      const comTradRegistros = linhasDiversidadeCompleto.filter((a: any) => {
+        const isProj = Boolean(
+          (a as any).nomeProjeto || (a as any).projeto || (a as any)._editalOrigem || (a as any).edital
+        );
+        return ehComunidadeTradicionalRegistro(a, { includeNomeProjeto: isProj });
       }).length;
 
       const genSeg = [
@@ -1596,7 +1619,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
         }).length,
       }));
 
-      const bTot = todosParaDiversidade.length || 1;
+      const bTot = linhasDiversidadeCompleto.length || 1;
       const indicesPerfilRacial = [{ nome: '% Negros/pardos (cor/raça)', qtd: Math.round((negros / bTot) * 100) }];
       const indicesLgbtqia = [
         { nome: 'Orientação sexual LGBTQ+', qtd: lgbtOrientacaoSexual },
@@ -1611,7 +1634,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       ];
 
       diversityCharts = {
-        totalBase: todosParaDiversidade.length,
+        totalBase: linhasDiversidadeCompleto.length,
         lgbtqiaUniao: lgbtqia,
         genero: mapToArr(generoMap, 10),
         raca: mapToArr(racaMap, 10),
@@ -1625,11 +1648,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
         ].filter((x) => x.qtd > 0),
         tradVinculo: [
           { nome: 'Comunidade tradicional', qtd: comTradRegistros },
-          { nome: 'Sem vínculo', qtd: Math.max(0, todosParaDiversidade.length - comTradRegistros) },
+          { nome: 'Sem vínculo', qtd: Math.max(0, linhasDiversidadeCompleto.length - comTradRegistros) },
         ],
         negrosComparativoBase: [
           { nome: 'Negros / pardos (cor/raça)', qtd: negros },
-          { nome: 'Demais registros', qtd: Math.max(0, todosParaDiversidade.length - negros) },
+          { nome: 'Demais registros', qtd: Math.max(0, linhasDiversidadeCompleto.length - negros) },
         ],
         inclusaoSemRacaELgbt: [
           { nome: 'Mulheres', qtd: mulheres },
@@ -1649,7 +1672,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
         homensMulheres: [
           { nome: 'Mulheres', qtd: mulheres },
           { nome: 'Homens', qtd: homens },
-          { nome: 'Outros / NI', qtd: Math.max(0, todosParaDiversidade.length - mulheres - homens) },
+          { nome: 'Outros / NI', qtd: Math.max(0, linhasDiversidadeCompleto.length - mulheres - homens) },
         ],
         lgbtqiaPorTipoCadastro,
         generoPorOrigem,
@@ -1710,11 +1733,56 @@ export function HomePage({ onNavigate }: HomePageProps) {
           ''
       ).trim();
       const bairro = canonicalBairroIlhabela(bairroRaw, end).replace(/\s+/g, ' ').trim() || bairroRaw || 'Não informado';
+      // Prioridade: bairros-coords.ts (coordenadas validadas e atualizadas)
+      const coords = getBairroCoords(bairro);
+      if (coords) return { bairro, lat: coords.lat, lng: coords.lng };
+      // Fallback: GPS direto do registro (só se o bairro não tiver mapeamento)
       const directLat = Number(row?.lat ?? row?.latitude ?? row?.Latitude);
       const directLng = Number(row?.lng ?? row?.longitude ?? row?.Longitude);
-      if (Number.isFinite(directLat) && Number.isFinite(directLng)) return { bairro, lat: directLat, lng: directLng };
-      const coords = getBairroCoords(bairro);
-      return { bairro, lat: coords?.lat, lng: coords?.lng };
+      if (Number.isFinite(directLat) && Number.isFinite(directLng) && Math.abs(directLat) > 1e-6 && Math.abs(directLng) > 1e-6) {
+        return { bairro, lat: directLat, lng: directLng };
+      }
+      return { bairro, lat: undefined, lng: undefined };
+    };
+
+    /** Projetos: priorizar bairro/endereço de execução (mapa e totais por território da ação), não só o do proponente. */
+    const mapCoordsForProjetoRow = (row: any) => {
+      const execBairro = findFieldValue(
+        row,
+        'bairro_execucao',
+        'bairro_execução',
+        'Bairro da execução',
+        'Bairro de execução',
+        'local_execucao',
+        'localExecucao',
+        'local_de_execucao',
+        'Local de execução',
+        'local_execução',
+        'local_de_realizacao',
+        'local_realizacao',
+        'Local de realização',
+        'regiao_execucao',
+        'Região de execução',
+        'bairro_projeto',
+        'Bairro do projeto',
+      ).trim();
+      const execEnd = findFieldValue(
+        row,
+        'endereco_execucao',
+        'enderecoExecucao',
+        'endereco_de_execucao',
+        'Endereço de execução',
+        'endereco_realizacao',
+        'Endereço de realização',
+      ).trim();
+      if (!execBairro && !execEnd) return mapCoordsForRow(row);
+      const merged = { ...row };
+      if (execBairro) merged.bairro = execBairro;
+      if (execEnd) {
+        merged.enderecoCompleto = execEnd;
+        merged.endereco = execEnd;
+      }
+      return mapCoordsForRow(merged);
     };
 
     const comunidadeTradicionalForMap = (row: any, includeNomeProjeto = false) => {
@@ -1730,7 +1798,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       const { eh, nome } = resolveComunidadeTradicional({
         rawField,
         bairro: String(row?.bairro || row?.Bairro || ''),
-        endereco: String(row?.enderecoCompleto || row?.endereco || row?.Endereço || ''),
+        enderecoCompleto: String(row?.enderecoCompleto || row?.endereco || row?.Endereço || ''),
         extras: includeNomeProjeto ? [String(row?.nome || row?.nomeProjeto || row?.projeto || row?.titulo || '')] : [],
       });
       return eh ? nome : '';
@@ -1762,21 +1830,31 @@ export function HomePage({ onNavigate }: HomePageProps) {
     };
 
     const projetoMapItem = (row: any, idx: number) => {
-      const coords = mapCoordsForRow(row);
+      const coords = mapCoordsForProjetoRow(row);
       const nomeProjeto = String(row?.nomeProjeto || row?.projeto || row?.Projeto || row?.titulo || row?.Título || row?.nome || 'Projeto sem nome').trim();
       const proponente = String(row?.proponente || row?.nomeProponente || row?.responsavel || row?.nome || '').trim();
       const contemplado = isProjetoContempladoParaEstatistica(row);
+      // Aldir Blanc 2020 prize registers (agentes/grupos/espaços) end up in the projetos
+      // array but are not project submissions — assign the correct cadastro tipo.
+      const editalDisplay = getEditalNomeExibicaoProjeto(row);
+      let tipoResolvido: 'projeto' | 'agente' | 'grupo' | 'espaco' = 'projeto';
+      for (const [tab, cfg] of Object.entries(OFFICIAL_ALDIR_BLANC_2020_VALUES)) {
+        if (editalDisplay.includes((cfg as any).nomeBase) || editalDisplay === (cfg as any).nome) {
+          tipoResolvido = tab === 'agentes' ? 'agente' : tab === 'grupos' ? 'grupo' : 'espaco';
+          break;
+        }
+      }
       return {
         ...row,
         id: `projeto-${idx}`,
-        tipo: 'projeto' as const,
+        tipo: tipoResolvido,
         nome: nomeProjeto,
         proponente,
         bairro: coords.bairro,
         lat: coords.lat,
         lng: coords.lng,
         categoria: row?.categoria || row?.Categoria || row?.areaAtuacao || row?.linguagem || 'Projeto cultural',
-        comunidadeTradicional: comunidadeTradicionalForMap(row, true),
+        comunidadeTradicional: comunidadeTradicionalForMap({ ...row, bairro: coords.bairro }, true),
         edital: getEditalNomeExibicaoProjeto(row),
         editais: [getEditalNomeExibicaoProjeto(row)],
         eh_contemplado: contemplado,
@@ -1796,7 +1874,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       comunidadesOficiais: COMUNIDADES_TRADICIONAIS.length,
       faixaAnos,
       inscricoesTotais,
-      totalDiversidade: todosParaDiversidade.length,
+      totalDiversidade: linhasDiversidadeCompleto.length,
       totalAgentes,
       totalGrupos,
       totalEspacos,
@@ -1815,12 +1893,24 @@ export function HomePage({ onNavigate }: HomePageProps) {
       breakdownEditais,
       customEditalLinks,
       // 🆕 Itens para o mapa (com lat/lng e editais que participou)
-      todosItens: [
-        ...unionCadastro.map((u, idx) => cadastroMapItem(u.row, u.tipo, idx)),
-        ...editaisFinais
+      todosItens: (() => {
+        const cadastroItems = unionCadastro.map((u, idx) => cadastroMapItem(u.row, u.tipo, idx));
+        const usedKeys = new Set<string>(
+          cadastroItems.map((item) => cadastroChaveDedupe(item)).filter(Boolean),
+        );
+        const projetoItems = editaisFinais
           .filter((p) => isProjetoContempladoParaEstatistica(p))
-          .map((p, idx) => projetoMapItem(p, idx)),
-      ]
+          .map((p, idx) => projetoMapItem(p, idx))
+          .filter((item) => {
+            // Skip reclassified cadastro rows already covered by unionCadastro
+            if (item.tipo !== 'projeto') {
+              const key = cadastroChaveDedupe(item);
+              if (key && usedKeys.has(key)) return false;
+            }
+            return true;
+          });
+        return [...cadastroItems, ...projetoItems];
+      })()
     };
   }, [refreshKey, serverPayload]);
 
@@ -2474,10 +2564,10 @@ export function HomePage({ onNavigate }: HomePageProps) {
               Agentes culturais no território
             </h2>
             <p className="mt-1 max-w-3xl text-xs font-normal leading-relaxed text-slate-600 sm:text-sm">
-              Consulta dinâmica por bairro, categoria, tipo e edital. Pontos agregados refletem a base deduplicada importada no painel.
+              Busca, filtros e mapa interativo. Use <strong className="font-semibold text-slate-700">Ver território</strong> para enquadrar os pontos; o zoom com o scroll do mouse funciona diretamente sobre o mapa. Cadastros sem coordenadas aparecem só na lista.
             </p>
           </div>
-          <div className="relative h-[300px] bg-slate-50 sm:h-[340px] lg:h-[390px]">
+          <div className="relative min-h-[min(72vh,620px)] h-[min(72vh,620px)] bg-slate-100/80 sm:min-h-[420px] sm:h-[420px] lg:min-h-[460px] lg:h-[460px]">
             {showCadastroLoadingShell && (
               <div className="absolute inset-0 z-[500] flex flex-col items-center justify-center gap-2 bg-white/90 px-4 text-center">
                 <p className="text-sm font-extrabold text-slate-700">Carregando cadastro cultural…</p>
@@ -2489,8 +2579,9 @@ export function HomePage({ onNavigate }: HomePageProps) {
             <StoreLocatorMap
               items={showCadastroLoadingShell ? [] : resumoGlobal.todosItens}
               editais={resumoGlobal.breakdownEditais}
-              center={[-23.82, -45.36]}
+              center={[-23.793, -45.362]}
               zoom={12}
+              sidebarWidth={336}
             />
           </div>
         </div>

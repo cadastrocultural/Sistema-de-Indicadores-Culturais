@@ -128,6 +128,107 @@ function RacialPersonIcon({ fill, size = 26 }: { fill: string; size?: number }) 
   );
 }
 
+const fistSkin = (variant: 'light' | 'medium' | 'dark' | 'unknown') =>
+  variant === 'light'
+    ? '#fcd9bd'
+    : variant === 'medium'
+      ? '#c68642'
+      : variant === 'dark'
+        ? '#5c3d2e'
+        : '#cbd5e1';
+
+/** Punho erguido em SVG (coordenadas absolutas no gráfico vetorial) */
+function DiversityFistMark({
+  x,
+  y,
+  variant,
+  accent,
+  muted,
+}: {
+  x: number;
+  y: number;
+  variant: 'light' | 'medium' | 'dark' | 'unknown';
+  accent: string;
+  muted?: boolean;
+}) {
+  const skin = fistSkin(variant);
+  const stroke = muted ? '#94a3b8' : accent;
+  return (
+    <g transform={`translate(${x}, ${y})`} aria-hidden>
+      <circle cx="14" cy="14" r="13" fill={muted ? '#f8fafc' : '#ffffff'} stroke={stroke} strokeWidth="1.6" />
+      {variant === 'unknown' ? (
+        <text x="14" y="18" textAnchor="middle" fill="#64748b" fontSize="13" fontWeight="800" style={{ fontFamily: INTER }}>
+          ?
+        </text>
+      ) : (
+        <g transform="translate(7, 5) scale(0.85)">
+          <ellipse cx="8" cy="16" rx="5" ry="6.5" fill={skin} />
+          <path
+            d="M3.5 10 L3.5 6.5 C3.5 5.2 4.5 4 6 4 C7 4 7.8 4.6 8.2 5.5 L8.5 4.8 C8.9 3.7 10.1 3 11.3 3.4 C12.4 3.7 13 4.8 12.8 6 L12.5 7.5 L13.2 6.8 C14.1 6 15.5 6.2 16.2 7.2 C16.8 8 16.6 9 16 9.7 L14.5 11.2 L14.2 14.5 C14 16.5 12.5 18 10.5 18.2 L7 18.5 C5 18.7 3.5 17 3.5 15 Z"
+            fill={skin}
+            stroke={skin}
+            strokeWidth="0.3"
+            strokeLinejoin="round"
+          />
+        </g>
+      )}
+    </g>
+  );
+}
+
+function fistVariantForLabel(label: string): 'light' | 'medium' | 'dark' | 'unknown' {
+  const n = normalizeText(label);
+  if (n.includes('nao') && n.includes('declar')) return 'unknown';
+  if (n.includes('branc')) return 'light';
+  if (n.includes('amarel') || n.includes('asiat')) return 'light';
+  if (n.includes('indigen')) return 'medium';
+  if (n.includes('pard')) return 'medium';
+  if (n.includes('pret')) return 'dark';
+  return 'medium';
+}
+
+/** Globo + avatares (referência visual imagem 2) */
+function Image2GlobeCenter({ cx, cy, r }: { cx: number; cy: number; r: number }) {
+  const skins = ['#fcd9bd', '#c68642', '#5c3d2e', '#fdba74'];
+  return (
+    <g aria-hidden>
+      <circle cx={cx} cy={cy} r={r} fill="#7dd3fc" opacity={0.35} />
+      <circle cx={cx} cy={cy} r={r * 0.92} fill="#38bdf8" opacity={0.25} />
+      <ellipse cx={cx - r * 0.12} cy={cy - r * 0.04} rx={r * 0.52} ry={r * 0.62} fill="#4ade80" />
+      <ellipse cx={cx + r * 0.38} cy={cy - r * 0.08} rx={r * 0.28} ry={r * 0.34} fill="#22c55e" />
+      <path
+        d={`M ${cx - r * 0.45} ${cy + r * 0.2} Q ${cx} ${cy + r * 0.55} ${cx + r * 0.42} ${cy + r * 0.18}`}
+        fill="none"
+        stroke="#0ea5e9"
+        strokeWidth="1.2"
+        opacity={0.45}
+      />
+      {[-1, -0.35, 0.35, 1].map((off, i) => (
+        <g key={i} transform={`translate(${cx + off * r * 0.22}, ${cy + r * 0.1})`}>
+          <circle cx={0} cy={0} r={11} fill="#fdba74" opacity={0.95} />
+          <circle cx={0} cy={-2} r={4.2} fill={skins[i % skins.length]} />
+          <path
+            d="M-5,10 Q0,5 5,10 L4.5,13.5 L-4.5,13.5 Z"
+            fill={skins[i % skins.length]}
+            opacity={0.95}
+          />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+function racePercentTextColor(label: string, segmentColor: string, muted?: boolean) {
+  if (muted) return '#94a3b8';
+  const n = normalizeText(label);
+  if (n.includes('pard')) return '#047857';
+  if (n.includes('branc')) return '#1e3a5f';
+  if (n.includes('pret')) return '#0f172a';
+  if (n.includes('indigen')) return '#1d4ed8';
+  if (n.includes('amarel') || n.includes('asiat')) return '#1e3a5f';
+  return segmentColor;
+}
+
 type RacialRadialItem = {
   label: string;
   value: number;
@@ -160,71 +261,153 @@ function describeDonutSegment(cx: number, cy: number, innerRadius: number, outer
   ].join(' ');
 }
 
-function RacialRadialChart({ items }: { items: RacialRadialItem[] }) {
-  const total = Math.max(1, items.reduce((acc, item) => acc + Math.max(0, Number(item.value) || 0), 0));
-  const cx = 75;
-  const cy = 112;
-  const innerRadius = 33;
-  const outerRadius = 62;
-  const visibleItems = items.filter((item) => item.value > 0);
-  let cursor = -118;
+/** Ordem da legenda: maiores fatias primeiro; “Não declarado” por último (como ranking). */
+function orderRacialRanking(items: RacialRadialItem[]): RacialRadialItem[] {
+  const v = items.filter((item) => item.value > 0);
+  const declared = v.filter((i) => !i.muted);
+  const ni = v.filter((i) => i.muted);
+  declared.sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0));
+  return [...declared, ...ni];
+}
+
+function RacialRadialChart({
+  items,
+  chartFilterUid: _chartFilterUid,
+}: {
+  items: RacialRadialItem[];
+  /** @deprecated reservado; percentuais vêm em `percentLabel` */
+  niShareOfTotalLabel?: string;
+  chartFilterUid?: string;
+}) {
+  const orderedItems = useMemo(() => orderRacialRanking(items), [items]);
+  const total = Math.max(
+    1,
+    orderedItems.reduce((acc, item) => acc + Math.max(0, Number(item.value) || 0), 0),
+  );
+  const n = orderedItems.length;
+  const gapDeg = n <= 1 ? 0 : 1.15;
+  const arcBudget = Math.max(0, 256 - gapDeg * Math.max(0, n - 1));
+  const arcStart = -218;
+  let cursor = arcStart;
+
+  const cx = 152;
+  const cy = 150;
+  const innerRadius = 54;
+  const outerRadius = 90;
+  const globeCx = cx;
+  const globeCy = cy + 2;
+  const globeR = innerRadius - 14;
+
+  const segmentAngles = orderedItems.map((item, index) => {
+    const frac = Math.max(0, Number(item.value) || 0) / total;
+    const sweep = arcBudget * frac;
+    const startAngle = cursor;
+    const endAngle = cursor + sweep;
+    cursor = endAngle + (index < n - 1 ? gapDeg : 0);
+    return { item, index, startAngle, endAngle };
+  });
+
+  if (orderedItems.length === 0) {
+    return (
+      <div className="flex min-h-[120px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 text-center text-xs font-semibold text-slate-400">
+        Sem categorias para exibir.
+      </div>
+    );
+  }
+
+  const rowStep = n <= 4 ? 50 : 44;
+  const legendTop = 22;
 
   return (
-    <div className="relative mx-auto h-[230px] w-full max-w-[360px]" style={{ fontFamily: INTER }}>
-      <svg viewBox="0 0 360 230" className="h-full w-full overflow-visible" role="img" aria-label="Distribuição de cor e raça">
-        <circle cx={cx} cy={cy} r={outerRadius + 16} fill="#f8fafc" />
-        <circle cx={cx} cy={cy} r={outerRadius + 8} fill="none" stroke="#dbe4ef" strokeWidth="8" strokeDasharray="5 17" strokeLinecap="round" />
+    <div className="mx-auto w-full max-w-[540px]" style={{ fontFamily: INTER }}>
+      <svg
+        viewBox="0 0 520 280"
+        className="h-auto w-full overflow-visible"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label="Distribuição de cor e raça"
+      >
+        <circle cx={cx} cy={cy} r={outerRadius + 28} fill="#f8fafc" />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={outerRadius + 16}
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth="5"
+          strokeDasharray="3 11"
+          strokeLinecap="round"
+        />
 
-        {visibleItems.map((item, index) => {
-          const sweep = Math.max(8, (Math.max(0, item.value) / total) * 312);
-          const startAngle = cursor;
-          const endAngle = Math.min(212, cursor + sweep);
-          cursor = endAngle + 5;
+        <path
+          d={describeDonutSegment(cx, cy, innerRadius, outerRadius, arcStart, arcStart + arcBudget)}
+          fill="#e5e7eb"
+          opacity={0.92}
+        />
+
+        {segmentAngles.map(({ item, startAngle, endAngle }) => (
+          <path
+            key={`arc-${item.label}`}
+            d={describeDonutSegment(cx, cy, innerRadius, outerRadius, startAngle, endAngle)}
+            fill={item.color}
+            opacity={item.muted ? 0.55 : 1}
+          />
+        ))}
+
+        <Image2GlobeCenter cx={globeCx} cy={globeCy} r={globeR} />
+
+        {segmentAngles.map(({ item, index, startAngle, endAngle }) => {
           const mid = (startAngle + endAngle) / 2;
-          const dot = polarToCartesian(cx, cy, outerRadius + 10, mid);
-          const lineStart = polarToCartesian(cx, cy, outerRadius + 15, mid);
-          const labelY = 28 + index * 31;
-          const elbowX = index % 2 === 0 ? 128 : 144;
-          const labelX = 188;
+          const ringDot = polarToCartesian(cx, cy, outerRadius + 6, mid);
+          const lineStart = polarToCartesian(cx, cy, outerRadius + 12, mid);
+          const labelY = legendTop + index * rowStep;
+          const elbowX = 262;
+          const iconX = 278;
+          const labelTextX = 308;
+          const pctX = 505;
+          const isNi = Boolean(item.muted) || normalizeText(item.label).includes('nao declar');
+          const pctFill = racePercentTextColor(item.label, item.color, item.muted);
+          const pctMain = item.percentLabel;
+          const labelLineY = isNi ? labelY + 2 : labelY + 4;
+          const subLineY = isNi ? labelY + 16 : labelY + 16;
+          const pctLineY = isNi ? labelY + 30 : labelY + 4;
 
           return (
-            <g key={item.label}>
+            <g key={`leg-${item.label}`}>
+              <circle cx={ringDot.x} cy={ringDot.y} r={3} fill="#ffffff" stroke="#94a3b8" strokeWidth="1.5" />
               <path
-                d={describeDonutSegment(cx, cy, innerRadius, outerRadius, startAngle, endAngle)}
-                fill={item.color}
-                opacity={item.muted ? 0.38 : 0.96}
-              />
-              <circle cx={dot.x} cy={dot.y} r="3.4" fill="#ffffff" stroke={item.color} strokeWidth="2" />
-              <path
-                d={`M ${lineStart.x} ${lineStart.y} C ${elbowX} ${lineStart.y}, ${elbowX - 8} ${labelY}, ${labelX - 30} ${labelY}`}
+                d={`M ${lineStart.x} ${lineStart.y} L ${elbowX} ${lineStart.y} L ${elbowX} ${labelY + (isNi ? 8 : 0)} L ${iconX - 4} ${labelY + (isNi ? 8 : 0)}`}
                 fill="none"
-                stroke={item.muted ? '#cbd5e1' : item.color}
-                strokeWidth="1.4"
-                strokeLinecap="round"
+                stroke="#94a3b8"
+                strokeWidth="1.1"
+                strokeLinejoin="round"
               />
-              <circle cx={labelX - 30} cy={labelY} r="2.6" fill={item.muted ? '#94a3b8' : item.color} />
-              <g transform={`translate(${labelX - 5} ${labelY - 13})`}>
-                <circle cx="13" cy="13" r="13" fill={item.muted ? '#f1f5f9' : '#ffffff'} stroke={item.muted ? '#cbd5e1' : item.color} strokeWidth="1.8" />
-                <circle cx="13" cy="9.8" r="3.6" fill={item.muted ? '#94a3b8' : item.color} opacity="0.82" />
-                <path d="M6,22 C6,16.8 20,16.8 20,22" fill={item.muted ? '#94a3b8' : item.color} opacity="0.82" />
-              </g>
-              <text x={labelX + 30} y={labelY - 2} fill={item.muted ? '#64748b' : '#334155'} fontSize="10.5" fontWeight="700">
+              <DiversityFistMark
+                x={iconX - 4}
+                y={labelY - 6}
+                variant={fistVariantForLabel(item.label)}
+                accent={item.color}
+                muted={item.muted}
+              />
+              <text x={labelTextX} y={labelLineY} fill="#1e293b" fontSize="12" fontWeight="700">
                 {item.label}
               </text>
-              <text x={330} y={labelY - 2} fill={item.muted ? '#94a3b8' : item.color} fontSize="11" fontWeight="900" textAnchor="end">
-                {item.percentLabel}
+              {isNi && (
+                <text x={labelTextX} y={subLineY} fill="#94a3b8" fontSize="9" fontWeight="600">
+                  Sem cor/raça informada na planilha
+                </text>
+              )}
+              {!isNi && (
+                <text x={labelTextX} y={subLineY} fill="#94a3b8" fontSize="9" fontWeight="600">
+                  {Number(item.value).toLocaleString('pt-BR')} reg.
+                </text>
+              )}
+              <text x={pctX} y={pctLineY} fill={isNi ? '#94a3b8' : pctFill} fontSize="13" fontWeight="900" textAnchor="end">
+                {pctMain}
               </text>
             </g>
           );
         })}
-
-        <circle cx={cx} cy={cy} r={innerRadius - 4} fill="#ffffff" />
-        <text x={cx} y={cy - 4} fill="#0f172a" fontSize="18" fontWeight="900" textAnchor="middle">
-          {visibleItems.length}
-        </text>
-        <text x={cx} y={cy + 12} fill="#94a3b8" fontSize="8.5" fontWeight="800" textAnchor="middle" letterSpacing="0.08em">
-          GRUPOS
-        </text>
       </svg>
     </div>
   );
@@ -488,16 +671,6 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
     [inclusaoModeloDados]
   );
 
-  const totalRacaRadar = useMemo(
-    () => Math.max(1, radarItems.reduce((acc, item) => acc + (Number(item.value) || 0), 0)),
-    [radarItems]
-  );
-
-  const totalRacaDeclarada = useMemo(
-    () => Math.max(0, radarItems.filter((item) => item.label !== 'Outros / NI').reduce((acc, item) => acc + (Number(item.value) || 0), 0)),
-    [radarItems]
-  );
-
   const idadeAbsMax = useMemo(() => {
     const max = idadePiramide.reduce((acc, row) => Math.max(acc, Math.abs(Number(row.homens) || 0), Math.abs(Number(row.mulheres) || 0)), 0);
     return Math.max(10, Math.ceil(max / 10) * 10);
@@ -517,11 +690,10 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
   const insightRaca = useMemo(() => {
     if (!hasAnyQty(data?.raca ?? [])) return undefined;
     const negros = inclusaoModeloDados.etnia.preto + inclusaoModeloDados.etnia.pardo;
-    const baseDeclarada = Math.max(1, totalRacaDeclarada);
-    const pct = (negros / baseDeclarada) * 100;
-    if (pct < 30) return { level: 'warn' as InsightLevel, text: `Negros/pardos: ${pct.toFixed(0)}% — sub-representação relevante. Considere ações afirmativas nos próximos editais.` };
-    return { level: 'ok' as InsightLevel, text: `Negros/pardos: ${pct.toFixed(0)}% da base com cor/raça declarada. Continue monitorando.` };
-  }, [data, inclusaoModeloDados, totalRacaDeclarada]);
+    const pct = totalBase > 0 ? (negros / totalBase) * 100 : 0;
+    if (pct < 30) return { level: 'warn' as InsightLevel, text: `Negros/pardos: ${pct.toFixed(0)}% do total de registros na base — sub-representação relevante. Considere ações afirmativas nos próximos editais.` };
+    return { level: 'ok' as InsightLevel, text: `Negros/pardos: ${pct.toFixed(0)}% do total de registros (cadastro + editais importados). Continue monitorando.` };
+  }, [data, inclusaoModeloDados, totalBase]);
 
   const insightIdade = useMemo(() => {
     if (!hasAnyQty(data?.idadeFaixa ?? [])) return undefined;
@@ -583,15 +755,15 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
 
             {/* ── COL 1: Cor / Raça — donut + lista com ícones de pessoa ── */}
             {(() => {
-              const RACE_COLORS = ['#F2B84B', '#2F80ED', '#00A38C', '#8B5CF6', '#64748B'];
+              const RACE_COLORS = ['#1e3a5f', '#0f766e', '#2563eb', '#38bdf8', '#0ea5e9', '#64748b'];
+              const denom = Math.max(1, data.totalBase);
               const declared = radarItems.filter(r => r.value > 0 && r.label !== 'Outros / NI');
               const niVal = radarItems.find(r => r.label === 'Outros / NI')?.value ?? 0;
-              const niPct = totalRacaRadar > 0 ? Math.round((niVal / totalRacaRadar) * 100) : 0;
-              const declaredTotal = declared.reduce((acc, item) => acc + (Number(item.value) || 0), 0);
-              const hasDeclared = declared.length > 0;
+              const niPct = denom > 0 ? Math.round((niVal / denom) * 100) : 0;
+              const hasDeclared = declared.length > 0 || niVal > 0;
               const radialItems: RacialRadialItem[] = [
                 ...declared.map((item, i) => {
-                  const pct = declaredTotal > 0 ? Math.round((item.value / declaredTotal) * 100) : 0;
+                  const pct = denom > 0 ? Math.round((item.value / denom) * 100) : 0;
                   return {
                     label: item.label,
                     value: item.value,
@@ -604,24 +776,27 @@ export function HomeDiversityCharts({ data, chartUid }: Props) {
                       label: 'Não declarado',
                       value: niVal,
                       color: '#94a3b8',
-                      percentLabel: `${niPct}% total`,
+                      percentLabel: `${niPct}%`,
                       muted: true,
                     }]
                   : []),
               ];
               return (
-                <div className="flex flex-col">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 text-center">Cor / Raça</p>
+                <div className="flex flex-col min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1 text-left">Cor / Raça</p>
                   {hasDeclared && (
-                    <p className="mb-2 text-center text-[10px] font-semibold leading-snug text-slate-400">
-                      Percentual sobre {declaredTotal.toLocaleString('pt-BR')} registro(s) com declaração.
+                    <p className="mb-3 text-left text-[10px] font-semibold leading-snug text-slate-400">
+                      Percentuais sobre {denom.toLocaleString('pt-BR')} registro(s) no total (cadastro cultural + linhas importadas nos editais).
                     </p>
                   )}
                   {hasDeclared ? (
                     <>
-                      <RacialRadialChart items={radialItems} />
+                      <RacialRadialChart
+                        items={radialItems}
+                        chartFilterUid={chartUid}
+                      />
                       {niPct > 0 && (
-                        <p className="-mt-2 text-center text-[9px] font-bold text-slate-400" style={{ fontFamily: INTER }}>
+                        <p className="mt-2 text-left text-[9px] font-bold text-slate-400" style={{ fontFamily: INTER }}>
                           “Não declarado” continua calculado sobre a base total.
                         </p>
                       )}

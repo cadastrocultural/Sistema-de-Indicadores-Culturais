@@ -49,6 +49,7 @@ import {
   getProjetoValorNormalizado,
   OFFICIAL_ALDIR_BLANC_2020_VALUES,
   parseBRLField,
+  buildLinhasParticipacaoProjeto,
 } from './admin/projetosDemandaOferta';
 import { inferGenderFromName } from './admin/genderInference';
 import { universalFieldScanner } from './admin/universalScanner';
@@ -102,6 +103,29 @@ type EventoCidade = {
   link?: string;
   publicado: boolean;
 };
+
+/** Guardamos `data` como YYYY-MM-DD; o formulário mostra DD/MM/AAAA. */
+function eventoDataBrParaIso(raw: string): string {
+  const t = String(raw || '').trim();
+  if (!t) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m = t.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+  if (!m) return '';
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = m[3];
+  if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function eventoDataIsoParaBr(iso: string): string {
+  const t = String(iso || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+    const [y, mo, d] = t.split('-');
+    return `${d}/${mo}/${y}`;
+  }
+  return t;
+}
 
 /** Campos opcionais: ausente = usar valor calculado da planilha */
 type EditalResumoOverride = {
@@ -262,7 +286,9 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
   const [showRenameEdital, setShowRenameEdital] = useState(false);
   
   // 🔗 Links customizados de editais (dinâmicos, salvos junto com dados)
-  const [customEditalLinks, setCustomEditalLinks] = useState<Record<string, { resultado?: string; resumo?: string; diarioOficial?: string }>>({}); 
+  const [customEditalLinks, setCustomEditalLinks] = useState<Record<string, { resultado?: string; resumo?: string; diarioOficial?: string }>>({});
+  const [novoEditalNome, setNovoEditalNome] = useState('');
+  const [novoEditalLinks, setNovoEditalLinks] = useState({ resultado: '', resumo: '', diarioOficial: '' });
   const [hasUndoSnapshot, setHasUndoSnapshot] = useState(false);
   const [recoveringData, setRecoveringData] = useState(false);
   const GALLERY_UPLOAD_KEY = 'gallery_uploaded_images_by_year';
@@ -282,6 +308,34 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
     link: '',
     publicado: true,
   });
+
+  /** Persistência após alterações no calendário: evita bloquear a UI (JSON grande + rede). */
+  const persistDataRef = useRef<((newData: ParsedData, linksOverride?: Record<string, { resultado?: string; resumo?: string; diarioOficial?: string }>) => Promise<void>) | null>(null);
+  const calendarPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const calendarPersistQueuedRef = useRef<ParsedData | null>(null);
+
+  const queuePersistAfterCalendarChange = (newData: ParsedData) => {
+    calendarPersistQueuedRef.current = newData;
+    if (calendarPersistTimerRef.current) clearTimeout(calendarPersistTimerRef.current);
+    calendarPersistTimerRef.current = setTimeout(() => {
+      calendarPersistTimerRef.current = null;
+      const latest = calendarPersistQueuedRef.current;
+      calendarPersistQueuedRef.current = null;
+      if (latest && persistDataRef.current) void persistDataRef.current(latest);
+    }, 600);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (calendarPersistTimerRef.current) {
+        clearTimeout(calendarPersistTimerRef.current);
+        calendarPersistTimerRef.current = null;
+      }
+      const pending = calendarPersistQueuedRef.current;
+      calendarPersistQueuedRef.current = null;
+      if (pending && persistDataRef.current) void persistDataRef.current(pending);
+    };
+  }, []);
 
   const showFeedback = (type: 'success' | 'info' | 'warning' | 'error', text: string) => {
     setActionFeedback({ type, text });
@@ -376,8 +430,13 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
   };
 
   const salvarEventoCidade = () => {
-    if (!eventoForm.titulo.trim() || !eventoForm.data) {
+    if (!eventoForm.titulo.trim() || !eventoForm.data.trim()) {
       showFeedback('warning', 'Informe pelo menos o título e a data do evento.');
+      return;
+    }
+    const dataIso = eventoDataBrParaIso(eventoForm.data.trim());
+    if (!dataIso) {
+      showFeedback('warning', 'Data inválida. Use o formato dia/mês/ano (ex.: 27/04/2026).');
       return;
     }
 
@@ -386,7 +445,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
       id: editingEventoId || `evento-${Date.now()}`,
       ...eventoForm,
       titulo: eventoForm.titulo.trim(),
-      data: eventoForm.data,
+      data: dataIso,
       hora: eventoForm.hora?.trim(),
       local: eventoForm.local?.trim(),
       categoria: eventoForm.categoria?.trim() || 'Cultura',
@@ -400,16 +459,17 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
 
     const newPD = { ...parsedData, eventosCidade };
     setParsedData(newPD);
-    void persistData(newPD);
+    queuePersistAfterCalendarChange(newPD);
     resetEventoForm();
-    showFeedback('success', 'Evento salvo e disponível para o calendário do site.');
+    showFeedback('success', 'Evento salvo localmente; gravação no servidor em instantes.');
   };
 
   const editarEventoCidade = (evento: EventoCidade) => {
     setEditingEventoId(evento.id);
+    const iso = eventoDataBrParaIso(String(evento.data || '')) || String(evento.data || '').trim();
     setEventoForm({
       titulo: evento.titulo || '',
-      data: evento.data || '',
+      data: iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? eventoDataIsoParaBr(iso) : String(evento.data || ''),
       hora: evento.hora || '',
       local: evento.local || '',
       categoria: evento.categoria || 'Cultura',
@@ -424,7 +484,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
     const eventosCidade = (parsedData.eventosCidade || []).filter((evento) => evento.id !== eventoId);
     const newPD = { ...parsedData, eventosCidade };
     setParsedData(newPD);
-    void persistData(newPD);
+    queuePersistAfterCalendarChange(newPD);
     if (editingEventoId === eventoId) resetEventoForm();
     showFeedback('success', 'Evento removido do calendário.');
   };
@@ -435,7 +495,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
     );
     const newPD = { ...parsedData, eventosCidade };
     setParsedData(newPD);
-    void persistData(newPD);
+    queuePersistAfterCalendarChange(newPD);
   };
 
   useEffect(() => {
@@ -2761,6 +2821,8 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
     }
   };
 
+  persistDataRef.current = persistData;
+
   const saveUndoSnapshot = (reason: string) => {
     try {
       const snapshot = {
@@ -3488,9 +3550,13 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
   const totalCadastrosAdmin = (parsedData.agentes?.length || 0) + (parsedData.grupos?.length || 0) + (parsedData.espacos?.length || 0);
   const totalProjetosAdmin = parsedData.projetos?.length || 0;
   const totalImagensAdmin = galleryUploadedImages.length;
-  const eventosOrdenadosAdmin = [...(parsedData.eventosCidade || [])]
-    .filter((e): e is EventoCidade => e != null && typeof e === 'object')
-    .sort((a, b) => `${a.data || ''} ${a.hora || ''}`.localeCompare(`${b.data || ''} ${b.hora || ''}`, 'pt-BR'));
+  const eventosOrdenadosAdmin = useMemo(
+    () =>
+      [...(parsedData.eventosCidade || [])]
+        .filter((e): e is EventoCidade => e != null && typeof e === 'object')
+        .sort((a, b) => `${a.data || ''} ${a.hora || ''}`.localeCompare(`${b.data || ''} ${b.hora || ''}`, 'pt-BR')),
+    [parsedData.eventosCidade],
+  );
 
   if (!adminAuthed) {
     return (
@@ -3505,7 +3571,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                 Painel Administrativo
               </Typography>
               <Typography variant="body2" sx={{ mt: 0.75, color: 'rgba(255,255,255,0.72)', fontWeight: 600 }}>
-                Cadastro Cultural de Ilhabela
+                Cadastro Cultural Ilhabela
               </Typography>
             </Box>
             <CardContent sx={{ p: 4 }}>
@@ -3816,13 +3882,13 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
             {tabValue === 4 && (
               <Box>
                 <Alert severity="info" sx={{ mb: 3 }}>
-                  <strong>📅 Calendário público:</strong> cadastre eventos importantes da cidade para aparecerem no Dashboard do site.
-                  Use o campo "Publicado" para preparar eventos sem exibir imediatamente.
+                  <strong>Calendário público:</strong> cadastre eventos para o painel do site. Informe a data em <strong>DD/MM/AAAA</strong>.
+                  Use &quot;Publicado&quot; para rascunhos. A gravação no servidor é feita logo após a alteração (pode levar um instante se a base for grande).
                 </Alert>
 
                 <Paper sx={{ p: 3, mb: 3, borderRadius: 3, border: '1px solid #d7efe3', bgcolor: '#f6fbf7' }}>
                   <Grid container spacing={2}>
-                    <Grid item xs={12} md={6}>
+                    <Grid size={{ xs: 12, md: 6 }}>
                       <TextField
                         fullWidth
                         label="Título do evento"
@@ -3830,17 +3896,18 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         onChange={(e) => setEventoForm((prev) => ({ ...prev, titulo: e.target.value }))}
                       />
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                       <TextField
                         fullWidth
-                        type="date"
                         label="Data"
+                        placeholder="DD/MM/AAAA"
                         value={eventoForm.data}
                         onChange={(e) => setEventoForm((prev) => ({ ...prev, data: e.target.value }))}
-                        InputLabelProps={{ shrink: true }}
+                        helperText="Formato brasileiro: dia, mês e ano"
+                        inputProps={{ inputMode: 'numeric', maxLength: 10, 'aria-label': 'Data do evento DD/MM/AAAA' }}
                       />
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                       <TextField
                         fullWidth
                         type="time"
@@ -3848,9 +3915,11 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         value={eventoForm.hora}
                         onChange={(e) => setEventoForm((prev) => ({ ...prev, hora: e.target.value }))}
                         InputLabelProps={{ shrink: true }}
+                        inputProps={{ step: 60 }}
+                        helperText="24 h (relógio do sistema)"
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                       <TextField
                         fullWidth
                         label="Local"
@@ -3859,7 +3928,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         placeholder="Ex: Praça das Bandeiras"
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                       <TextField
                         fullWidth
                         label="Categoria"
@@ -3868,7 +3937,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         placeholder="Cultura, formação, festival..."
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                       <TextField
                         fullWidth
                         label="Link"
@@ -3877,7 +3946,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         placeholder="https://..."
                       />
                     </Grid>
-                    <Grid item xs={12}>
+                    <Grid size={12}>
                       <TextField
                         fullWidth
                         multiline
@@ -3887,7 +3956,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         onChange={(e) => setEventoForm((prev) => ({ ...prev, descricao: e.target.value }))}
                       />
                     </Grid>
-                    <Grid item xs={12}>
+                    <Grid size={12}>
                       <Stack direction="row" alignItems="center" flexWrap="wrap" gap={2}>
                         <FormControlLabel
                           control={
@@ -3929,7 +3998,17 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         {eventosOrdenadosAdmin.map((evento) => (
                           <TableRow key={evento.id} hover>
                             <TableCell sx={{ fontWeight: 800, color: '#284574' }}>
-                              {new Date(`${evento.data}T00:00:00`).toLocaleDateString('pt-BR')}
+                              {(() => {
+                                const iso =
+                                  eventoDataBrParaIso(String(evento.data || '')) ||
+                                  (/^\d{4}-\d{2}-\d{2}$/.test(String(evento.data || '').trim())
+                                    ? String(evento.data).trim()
+                                    : '');
+                                if (iso) {
+                                  return new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR');
+                                }
+                                return evento.data || '—';
+                              })()}
                               {evento.hora && <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, color: '#64748b' }}>{evento.hora}</Typography>}
                             </TableCell>
                             <TableCell>
@@ -3982,7 +4061,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
 
                 <Paper sx={{ p: 3, mb: 3, borderRadius: 3, border: '1px solid #d7efe3', bgcolor: '#f6fbf7' }}>
                   <Grid container spacing={2} alignItems="center">
-                    <Grid item xs={12} md={3}>
+                    <Grid size={{ xs: 12, md: 3 }}>
                       <TextField
                         fullWidth
                         label="Ano das imagens"
@@ -3992,7 +4071,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         inputProps={{ min: 1900, max: 2100 }}
                       />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                       <TextField
                         fullWidth
                         label="Nome do artista (opcional)"
@@ -4002,7 +4081,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         helperText="Se preencher, aparece na galeria pública como crédito; o nome do ficheiro continua como legenda secundária."
                       />
                     </Grid>
-                    <Grid item xs={12} md={5}>
+                    <Grid size={{ xs: 12, md: 5 }}>
                       <Button
                         fullWidth
                         variant="contained"
@@ -4021,7 +4100,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         />
                       </Button>
                     </Grid>
-                    <Grid item xs={12}>
+                    <Grid size={12}>
                       <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#52645d' }}>
                         {galleryUploadedImages.length} imagem(ns) enviada(s) pelo Admin neste navegador.
                       </Typography>
@@ -4254,8 +4333,29 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                               </TableCell>
                               <TableCell>{item.cpf || item.cnpj || item.cpf_cnpj || '-'}</TableCell>
                               <TableCell>
-                                {item.lat && item.lng && item.lat !== 0 && item.lng !== 0 ? (
-                                  <Chip label="✓ Com mapa" size="small" color="success" />
+                                {isEditing ? (
+                                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                    <TextField
+                                      size="small" label="Lat" type="number"
+                                      value={editValues.lat !== undefined ? editValues.lat : (item.lat ?? '')}
+                                      onChange={e => setEditValues(prev => ({ ...prev, lat: e.target.value !== '' ? Number(e.target.value) : undefined }))}
+                                      sx={{ width: 130, '& input': { fontSize: '0.75rem', py: 0.5 } }}
+                                      inputProps={{ step: '0.0001' }}
+                                      placeholder="-23.7900"
+                                    />
+                                    <TextField
+                                      size="small" label="Lng" type="number"
+                                      value={editValues.lng !== undefined ? editValues.lng : (item.lng ?? '')}
+                                      onChange={e => setEditValues(prev => ({ ...prev, lng: e.target.value !== '' ? Number(e.target.value) : undefined }))}
+                                      sx={{ width: 130, '& input': { fontSize: '0.75rem', py: 0.5 } }}
+                                      inputProps={{ step: '0.0001' }}
+                                      placeholder="-45.3600"
+                                    />
+                                  </Box>
+                                ) : item.lat && item.lng && item.lat !== 0 && item.lng !== 0 ? (
+                                  <Tooltip title={`${Number(item.lat).toFixed(5)}, ${Number(item.lng).toFixed(5)}`}>
+                                    <Chip label="✓ Com mapa" size="small" color="success" />
+                                  </Tooltip>
                                 ) : (
                                   <Chip label="Sem coord." size="small" color="default" />
                                 )}
@@ -5718,34 +5818,56 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                                   {temLinks && <Chip label="Links configurados" size="small" sx={{ bgcolor: '#d1fae5', color: '#065f46', fontSize: '0.65rem', height: 20, fontWeight: 600 }} />}
                                 </Box>
                                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
-                                  <TextField
-                                    size="small"
-                                    label="Link resultado"
-                                    defaultValue={custom.resultado || existingLinks?.resultado || ''}
-                                    onBlur={e => saveEditalLink(ed.nome, 'resultado', e.target.value)}
-                                    placeholder="https://ilhabela.sp.gov.br/..."
-                                    sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
-                                  />
-                                  <TextField
-                                    size="small"
-                                    label="Link resumo"
-                                    defaultValue={custom.resumo || existingLinks?.resumo || ''}
-                                    onBlur={e => saveEditalLink(ed.nome, 'resumo', e.target.value)}
-                                    placeholder="https://ilhabela.sp.gov.br/..."
-                                    sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
-                                  />
-                                  <TextField
-                                    size="small"
-                                    label="Diário oficial"
-                                    defaultValue={custom.diarioOficial || existingLinks?.diarioOficial || ''}
-                                    onBlur={e => saveEditalLink(ed.nome, 'diarioOficial', e.target.value)}
-                                    placeholder="https://ilhabela.sp.gov.br/..."
-                                    sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }}
-                                  />
+                                  <TextField size="small" label="Link resultado" defaultValue={custom.resultado || existingLinks?.resultado || ''} onBlur={e => saveEditalLink(ed.nome, 'resultado', e.target.value)} placeholder="https://ilhabela.sp.gov.br/..." sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }} />
+                                  <TextField size="small" label="Link resumo" defaultValue={custom.resumo || existingLinks?.resumo || ''} onBlur={e => saveEditalLink(ed.nome, 'resumo', e.target.value)} placeholder="https://ilhabela.sp.gov.br/..." sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }} />
+                                  <TextField size="small" label="Diário oficial" defaultValue={custom.diarioOficial || existingLinks?.diarioOficial || ''} onBlur={e => saveEditalLink(ed.nome, 'diarioOficial', e.target.value)} placeholder="https://ilhabela.sp.gov.br/..." sx={{ flex: 1, minWidth: 200, '& input': { fontSize: '0.75rem' }, bgcolor: 'white' }} />
                                 </Box>
                               </Paper>
                             );
                           })}
+
+                          {/* ➕ Adicionar link para edital que não está na lista acima */}
+                          <Paper sx={{ p: 2, mt: 2, borderRadius: 2, border: '2px dashed #7c3aed', bgcolor: '#faf5ff' }}>
+                            <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 800, color: '#5b21b6', display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Plus size={16} /> Adicionar links para outro edital (nome personalizado)
+                            </Typography>
+                            <Typography variant="caption" sx={{ display: 'block', mb: 1.5, color: '#7c3aed' }}>
+                              Use quando o edital não aparece na lista acima (ex: edital futuro, edital renomeado ou sem dados importados ainda).
+                            </Typography>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                              <TextField
+                                size="small" fullWidth
+                                label="Nome do edital *"
+                                value={novoEditalNome}
+                                onChange={e => setNovoEditalNome(e.target.value)}
+                                placeholder="Ex: Lei Paulo Gustavo (2023)"
+                                sx={{ bgcolor: 'white', '& input': { fontSize: '0.8rem' } }}
+                              />
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+                                <TextField size="small" label="Link resultado" value={novoEditalLinks.resultado} onChange={e => setNovoEditalLinks(p => ({ ...p, resultado: e.target.value }))} placeholder="https://..." sx={{ flex: 1, minWidth: 180, bgcolor: 'white', '& input': { fontSize: '0.75rem' } }} />
+                                <TextField size="small" label="Link resumo" value={novoEditalLinks.resumo} onChange={e => setNovoEditalLinks(p => ({ ...p, resumo: e.target.value }))} placeholder="https://..." sx={{ flex: 1, minWidth: 180, bgcolor: 'white', '& input': { fontSize: '0.75rem' } }} />
+                                <TextField size="small" label="Diário oficial" value={novoEditalLinks.diarioOficial} onChange={e => setNovoEditalLinks(p => ({ ...p, diarioOficial: e.target.value }))} placeholder="https://..." sx={{ flex: 1, minWidth: 180, bgcolor: 'white', '& input': { fontSize: '0.75rem' } }} />
+                              </Box>
+                              <Button
+                                size="small" variant="contained"
+                                disabled={!novoEditalNome.trim()}
+                                startIcon={<Save size={14} />}
+                                onClick={() => {
+                                  const nome = novoEditalNome.trim();
+                                  if (!nome) return;
+                                  const newLinks = { ...customEditalLinks, [nome]: { resultado: novoEditalLinks.resultado || undefined, resumo: novoEditalLinks.resumo || undefined, diarioOficial: novoEditalLinks.diarioOficial || undefined } };
+                                  setCustomEditalLinks(newLinks);
+                                  localStorage.setItem('custom_edital_links', JSON.stringify(newLinks));
+                                  void persistData(parsedData, newLinks);
+                                  setNovoEditalNome('');
+                                  setNovoEditalLinks({ resultado: '', resumo: '', diarioOficial: '' });
+                                }}
+                                sx={{ alignSelf: 'flex-start', bgcolor: '#7c3aed', '&:hover': { bgcolor: '#5b21b6' } }}
+                              >
+                                Salvar novo edital
+                              </Button>
+                            </Box>
+                          </Paper>
                         </Box>
                       </Box>
                     )}
@@ -6672,7 +6794,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
             {tabValue === 2 && (() => {
               const allProjetos = parsedData.projetos || [];
 
-              // Agrupa por nome normalizado do proponente
+              // Agrupa por nome normalizado: proponente + integrantes (ficha técnica) em projetos de terceiros
               const porPessoa = (() => {
                 const map = new Map<string, {
                   nomeDisplay: string;
@@ -6681,49 +6803,69 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                     edital: string;
                     anoLabel: string;
                     chaveEdital: string;
+                    projetoInstanceKey: string;
                     status: string;
                     valor: number;
                     eh_contemplado: boolean;
-                    funcao: 'Proponente';
+                    funcao: string;
                   }>;
                 }>();
 
                 allProjetos.forEach((p: any) => {
-                  const nomeRaw = String(p.proponente || p.nome || '').trim();
-                  if (!nomeRaw) return;
-                  const nomeKey = normalizeFullPersonNameForRanking(nomeRaw);
-                  if (!nomeKey) return;
-                  if (!map.has(nomeKey)) map.set(nomeKey, { nomeDisplay: nomeRaw, projetos: [] });
-                  const entry = map.get(nomeKey)!;
-                  const edital = String(p._editalOrigem || p.edital || 'Sem edital');
-                  const ano = String(p._anoOrigem || p.ano || '');
-                  entry.projetos.push({
-                    nomeProjeto: String(p.nomeProjeto || p.nome_projeto || p.nome || ''),
-                    edital,
-                    anoLabel: ano,
-                    chaveEdital: `${edital}||${ano}`,
-                    status: String(p.status || ''),
-                    valor: getProjetoValorNormalizado(p),
-                    eh_contemplado: isProjetoContemplado(p),
-                    funcao: 'Proponente',
-                  });
+                  const linhas = buildLinhasParticipacaoProjeto(p);
+                  for (const L of linhas) {
+                    const nomeKey = normalizeFullPersonNameForRanking(L.nomeRaw);
+                    if (!nomeKey) continue;
+                    if (!map.has(nomeKey)) {
+                      map.set(nomeKey, { nomeDisplay: L.nomeRaw, projetos: [] });
+                    } else {
+                      const cur = map.get(nomeKey)!;
+                      if (L.nomeRaw.trim().length > cur.nomeDisplay.trim().length) {
+                        cur.nomeDisplay = L.nomeRaw.trim();
+                      }
+                    }
+                    const entry = map.get(nomeKey)!;
+                    entry.projetos.push({
+                      nomeProjeto: L.nomeProjeto,
+                      edital: L.edital,
+                      anoLabel: L.anoLabel,
+                      chaveEdital: L.chaveEdital,
+                      projetoInstanceKey: L.projetoInstanceKey,
+                      status: L.status,
+                      valor: L.valor,
+                      eh_contemplado: L.eh_contemplado,
+                      funcao: L.funcao,
+                    });
+                  }
                 });
 
                 return Array.from(map.values()).map(entry => {
-                  // Conta projetos por edital para detectar excesso
-                  const contPorEdital: Record<string, number> = {};
+                  const contPorEdital: Record<string, Set<string>> = {};
                   entry.projetos.forEach(proj => {
-                    contPorEdital[proj.chaveEdital] = (contPorEdital[proj.chaveEdital] || 0) + 1;
+                    if (!contPorEdital[proj.chaveEdital]) contPorEdital[proj.chaveEdital] = new Set();
+                    contPorEdital[proj.chaveEdital].add(proj.projetoInstanceKey);
                   });
                   const alertas = Object.entries(contPorEdital)
-                    .filter(([, n]) => n > 4)
-                    .map(([chave, n]) => {
+                    .filter(([, set]) => set.size > 4)
+                    .map(([chave, set]) => {
                       const [ed, ano] = chave.split('||');
-                      return `${ed}${ano ? ` (${ano})` : ''}: ${n} projetos`;
+                      return `${ed}${ano ? ` (${ano})` : ''}: ${set.size} projetos`;
                     });
-                  const totalContemplados = entry.projetos.filter(p => p.eh_contemplado).length;
-                  const valorTotal = entry.projetos.filter(p => p.eh_contemplado).reduce((a, p) => a + p.valor, 0);
-                  const editaisUnicos = [...new Set(entry.projetos.map(p => p.chaveEdital))];
+                  const projetosContempladosKeys = new Set(
+                    entry.projetos.filter((x) => x.eh_contemplado).map((x) => x.projetoInstanceKey),
+                  );
+                  const totalContemplados = projetosContempladosKeys.size;
+                  let valorTotal = 0;
+                  const valorPorProjeto = new Map<string, number>();
+                  entry.projetos.forEach((proj) => {
+                    if (!proj.eh_contemplado) return;
+                    const prev = valorPorProjeto.get(proj.projetoInstanceKey) || 0;
+                    valorPorProjeto.set(proj.projetoInstanceKey, Math.max(prev, proj.valor));
+                  });
+                  valorPorProjeto.forEach((v) => {
+                    valorTotal += v;
+                  });
+                  const editaisUnicos = [...new Set(entry.projetos.map((p) => p.chaveEdital))];
                   return {
                     ...entry,
                     totalProjetos: entry.projetos.length,
@@ -6749,15 +6891,17 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
               return (
                 <Box>
                   <Alert severity="info" sx={{ mb: 3 }}>
-                    <strong>🎭 Análise de Participações:</strong> Cada proponente é agrupado com todos os seus projetos em todos os editais.
-                    Use esta aba para verificar se alguém submeteu mais de 4 projetos no mesmo edital.
+                    <strong>Análise de Participações:</strong> Agrupa <strong>proponentes</strong> e pessoas citadas em colunas de{' '}
+                    <strong>ficha técnica / equipe</strong> (quando a planilha traz esses campos). Cada linha contemplada usa a mesma regra de
+                    valor do painel (PNAB 2024, Aldir 2020, faixas etc.). O total “Valor recebido” soma cada <strong>projeto contemplado</strong>{' '}
+                    uma vez, mesmo que a pessoa apareça como proponente e na equipe. Alerta &gt;4: mais de quatro <em>projetos distintos</em> no mesmo edital.
                   </Alert>
 
                   {/* Resumo */}
                   <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
                     <Paper sx={{ p: 2, flex: 1, minWidth: 140, bgcolor: '#e3f2fd', border: '1px solid #90caf9', borderRadius: 2, textAlign: 'center' }}>
                       <Typography variant="h4" sx={{ fontWeight: 800, color: '#1565c0' }}>{allProjetos.length}</Typography>
-                      <Typography variant="body2" sx={{ color: '#1976d2', fontWeight: 600 }}>Total de inscrições</Typography>
+                      <Typography variant="body2" sx={{ color: '#1976d2', fontWeight: 600 }}>Linhas na base (projetos)</Typography>
                     </Paper>
                     <Paper sx={{ p: 2, flex: 1, minWidth: 140, bgcolor: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: 2, textAlign: 'center' }}>
                       <Typography variant="h4" sx={{ fontWeight: 800, color: '#2e7d32' }}>{porPessoa.length}</Typography>
@@ -6792,7 +6936,7 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                         <TableHead>
                           <TableRow sx={{ bgcolor: '#f5f5f5' }}>
                             <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Participante</TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Projetos</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Participações</TableCell>
                             <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Contemplados</TableCell>
                             <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Editais</TableCell>
                             <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Valor recebido</TableCell>
@@ -6850,11 +6994,22 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                                     <Box component="span" sx={{ color: proj.eh_contemplado ? '#2e7d32' : '#475569', fontWeight: proj.eh_contemplado ? 700 : 400 }}>
                                       {proj.nomeProjeto || '(sem nome)'}
                                     </Box>
-                                    <Chip
-                                      label={proj.funcao}
-                                      size="small"
-                                      sx={{ fontSize: '0.55rem', height: 16, bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 600 }}
-                                    />
+                                    {proj.funcao && (
+                                      <Chip
+                                        label={proj.funcao.length > 42 ? `${proj.funcao.slice(0, 41)}…` : proj.funcao}
+                                        title={proj.funcao.length > 42 ? proj.funcao : undefined}
+                                        size="small"
+                                        sx={{
+                                          fontSize: '0.55rem',
+                                          height: 16,
+                                          fontWeight: 600,
+                                          maxWidth: 220,
+                                          '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
+                                          bgcolor: proj.funcao.startsWith('Ficha técnica') ? '#fff3e0' : '#e3f2fd',
+                                          color: proj.funcao.startsWith('Ficha técnica') ? '#e65100' : '#1565c0',
+                                        }}
+                                      />
+                                    )}
                                     <Chip
                                       label={`${proj.edital}${proj.anoLabel ? ` ${proj.anoLabel}` : ''}`}
                                       size="small"
@@ -6862,7 +7017,11 @@ export function AdminPage({ onNavigate, adminAuthed, setAdminAuthed, adminAuthRe
                                     />
                                     {proj.eh_contemplado && (
                                       <Chip
-                                        label={proj.valor > 0 ? `R$ ${proj.valor.toLocaleString('pt-BR')}` : '✅'}
+                                        label={
+                                          proj.valor > 0
+                                            ? `R$ ${proj.valor.toLocaleString('pt-BR')}`
+                                            : 'Contemplado (valor não informado)'
+                                        }
                                         size="small"
                                         sx={{ fontSize: '0.55rem', height: 16, bgcolor: '#e8f5e9', color: '#2e7d32', fontWeight: 700 }}
                                       />

@@ -289,7 +289,7 @@ export default function App() {
             <div className="flex items-center gap-2.5">
               <img
                 src="/footer/logo-cadastro-cultural.png"
-                alt="Cadastro Cultural de Ilhabela"
+                alt="Cadastro Cultural Ilhabela"
                 className="h-10 w-10 object-contain"
               />
               <div className="text-left">
@@ -309,7 +309,7 @@ export default function App() {
           {/* Bottom Text */}
           <div className="mt-5 border-t border-slate-200/80 pt-5 text-center">
             <p className="mb-1 text-[0.75rem] font-medium text-slate-600">
-              Sistema de transparência · Cadastro Cultural de Ilhabela
+              Sistema de transparência · Cadastro Cultural Ilhabela
             </p>
             <p className="font-mono text-[0.6rem] font-medium uppercase tracking-[0.18em] text-slate-400">
               © 2020–2026 · dados municipais

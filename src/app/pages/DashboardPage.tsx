@@ -720,7 +720,7 @@ export function DashboardPage() {
             {/* Badge do Sistema */}
             <div className="flex justify-center items-center gap-2 mb-6">
               <span className="ds-badge ds-badge-primary">
-                Cadastro Cultural de Ilhabela
+                Cadastro Cultural Ilhabela
               </span>
             </div>
 

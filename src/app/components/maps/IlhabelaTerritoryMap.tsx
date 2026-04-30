@@ -41,10 +41,23 @@ export function IlhabelaTerritoryMap({ bairros, className, height = 400 }: Props
   const maxQ = useMemo(() => Math.max(1, ...pontos.map((p) => p.qtd)), [pontos]);
 
   return (
-    <div className={className} style={{ height, width: '100%', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(148,163,184,0.25)' }}>
+    <div
+      className={className}
+      style={{
+        height,
+        width: '100%',
+        borderRadius: 16,
+        overflow: 'hidden',
+        border: '1px solid rgba(13, 148, 136, 0.18)',
+        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.6), 0 12px 40px -28px rgba(15,23,42,0.25)',
+      }}
+    >
       {pontos.length === 0 ? (
-        <div className="flex h-full w-full items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50 text-sm font-medium text-slate-500">
-          Sem bairros com coordenadas para exibir no mapa. Importe cadastro com bairro identificável.
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-2xl border border-slate-200/80 bg-gradient-to-b from-slate-50 to-teal-50/30 px-6 text-center">
+          <p className="text-sm font-bold text-slate-700">Sem pontos no mapa</p>
+          <p className="max-w-sm text-xs font-medium leading-relaxed text-slate-500">
+            Importe cadastro com bairros reconhecidos na base municipal para ver a distribuição no território.
+          </p>
         </div>
       ) : (
         <MapContainer
@@ -54,25 +67,30 @@ export function IlhabelaTerritoryMap({ bairros, className, height = 400 }: Props
           scrollWheelZoom={false}
         >
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            attribution="&copy; OpenStreetMap &copy; CARTO"
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; CARTO'
           />
           {pontos.map((p, idx) => {
             const t = p.qtd / maxQ;
-            const r = 6 + t * 16;
-            const fill = `rgba(37, 99, 235, ${0.3 + t * 0.5})`;
+            const r = 7 + t * 18;
+            const fill = `rgba(13, 148, 136, ${0.35 + t * 0.45})`;
             return (
               <CircleMarker
                 key={`${p.nome}-${idx}`}
                 center={[p.lat, p.lng]}
                 radius={r}
-                pathOptions={{ color: '#1d4ed8', weight: 2, fillColor: fill, fillOpacity: 0.9 }}
+                pathOptions={{
+                  color: '#0f766e',
+                  weight: 2,
+                  fillColor: fill,
+                  fillOpacity: 0.92,
+                }}
               >
                 <Popup>
-                  <div style={{ minWidth: 140 }}>
-                    <strong style={{ fontSize: 13 }}>{p.nome}</strong>
-                    <div style={{ marginTop: 6, fontSize: 12, color: '#334155' }}>
-                      {p.qtd} registro{p.qtd === 1 ? '' : 's'}
+                  <div className="min-w-[150px] p-0.5">
+                    <strong className="text-[0.8125rem] text-slate-900">{p.nome}</strong>
+                    <div className="mt-1.5 text-xs font-semibold text-slate-600">
+                      {p.qtd} registro{p.qtd === 1 ? '' : 's'} no bairro
                     </div>
                   </div>
                 </Popup>

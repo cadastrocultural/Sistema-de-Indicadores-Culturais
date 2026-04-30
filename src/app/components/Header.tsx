@@ -57,11 +57,8 @@ export function Header({ currentPage, onPageChange, adminAuthed = false, onAdmin
           />
           <span className="min-w-0">
             <span className="block font-bold text-[0.92rem] leading-snug tracking-tight text-slate-900 sm:text-[1.05rem]">
-              <span className="hidden sm:inline">Cadastro Cultural de Ilhabela</span>
-              <span className="sm:hidden">Cadastro Cultural</span>
-            </span>
-            <span className="mt-0.5 hidden font-mono text-[0.62rem] font-medium uppercase tracking-[0.12em] text-slate-500 sm:block">
-              Observatório · indicadores culturais
+              <span className="hidden sm:inline">Cadastro Cultural Ilhabela</span>
+              <span className="sm:hidden">Cadastro Cultural Ilhabela</span>
             </span>
           </span>
         </button>

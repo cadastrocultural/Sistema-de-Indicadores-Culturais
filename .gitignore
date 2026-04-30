@@ -20,3 +20,4 @@ _smartcharts-extract/
 *.mkv
 src/app/data/videos/
 .vercel
+tmp/
